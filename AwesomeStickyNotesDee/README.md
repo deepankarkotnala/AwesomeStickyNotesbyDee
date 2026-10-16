@@ -58,6 +58,8 @@ When a reminder is due, a card slides in at the bottom-right with **Mark done** 
 
 Everything is stored locally in SQLite in the **`StickyNotesDB`** folder next to the app (`StickyNotesDB\notes.db`), which has three tables: `notes`, `tasks` and `settings`. Each change is written immediately. Items in the Recycle Bin stay in the database, marked with a `deleted_at` time, until the bin is emptied. A copy is saved to `notes.bak.db` every time the app starts, and if the main database is ever damaged, the app restores from that copy. To back up or move your notes, copy that folder while the app is closed.
 
+The same folder holds a readable log of every task: **`notes-log.txt`** (plain text) and **`notes-log.xlsx`** (an Excel sheet with filters). Both list tasks oldest first by creation date, with their status (Pending or Completed) and, once deleted, whether the task is in the Recycle Bin or deleted for good. They are rewritten about a second after each change, and rows are never removed, even after a task is deleted for good: the history behind them is kept in `notes-log.json`. If the workbook is open in Excel when something changes, it catches up within 30 seconds of being closed. The app never reads these files back, so editing them changes nothing.
+
 If the app folder isn't writable (for example under `Program Files`), the database goes to `%APPDATA%\AwesomeStickyNotes` instead. The first versions kept it in `%APPDATA%\StickyNotesDee`; if a database is still there, the app moves it into `StickyNotesDB` on start and leaves the old file renamed to `notes.moved-to-app-folder.db` as a safety copy.
 
 `StickyNotesDB/` is listed in `.gitignore`, so your notes stay out of version control.
@@ -83,6 +85,7 @@ stickynotes/
   hub.py               notes overview, completed history, reminders, Recycle Bin, settings
   reminders.py         reminder scheduler and toast pop-ups
   store.py             SQLite data model
+  notelog.py           plain-text and Excel log of every task
   timeparse.py         "@5pm"-style reminder parsing
   shadow.py            layered soft drop shadows
   icons.py             vector line icons

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 from . import APP_NAME, SLUG, system, theme
 from .hub import HubWindow
 from .note import MARGINS, NoteWindow
+from .notelog import NotesLog
 from .reminders import ReminderService
 from .store import Note, Store
 from .widgets import add_action, make_menu
@@ -75,6 +76,7 @@ class Controller(QObject):
         self.icon = app_icon()
         app.setWindowIcon(self.icon)
         self.store = Store()
+        self.log = NotesLog(self.store)
         self.windows: dict[str, NoteWindow] = {}
         self.hub: HubWindow | None = None
         self._today = date.today()
@@ -287,5 +289,6 @@ def main() -> int:
 
     server.newConnection.connect(on_connection)
     code = app.exec()
+    controller.log.flush()
     controller.store.close()
     return code
