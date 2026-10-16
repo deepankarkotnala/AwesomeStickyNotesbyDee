@@ -1,0 +1,3 @@
+PySide6==6.11.0
+# Desktop pinning, menu-bar-only mode and the Reduce Motion check (optional but recommended)
+pyobjc-framework-Cocoa==12.2.2; sys_platform == "darwin"
