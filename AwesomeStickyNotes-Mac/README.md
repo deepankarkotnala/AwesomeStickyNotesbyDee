@@ -68,6 +68,8 @@ Turn on **Settings → Open at login**. This adds a LaunchAgent at `~/Library/La
 
 Notes are stored locally in SQLite in `StickyNotesDB/notes.db` inside this folder, with a backup (`notes.bak.db`) made on every start. Items in the Recycle Bin stay in the database, marked with a `deleted_at` time, until the bin is emptied. If the folder isn't writable, the database goes to `~/Library/Application Support/AwesomeStickyNotes` instead. `StickyNotesDB/` is git-ignored.
 
+The same folder holds a readable log of every task: `notes-log.txt` (plain text) and `notes-log.xlsx` (opens in Excel or Numbers), oldest first by creation date with their status (Pending or Completed) and, once deleted, whether the task is in the Recycle Bin or deleted for good. They are rewritten about a second after each change, and rows are never removed; the history behind them is kept in `notes-log.json`.
+
 To move notes between your Windows PC and your Mac, copy `notes.db` between the two `StickyNotesDB` folders while both apps are closed.
 
 ## Build a standalone .app (optional)
