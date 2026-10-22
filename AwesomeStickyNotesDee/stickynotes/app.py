@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPen, QPixma
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
-from . import APP_NAME, SLUG, system, theme
+from . import APP_NAME, SLUG, screens, system, theme
 from .hub import HubWindow
 from .note import MARGINS, NoteWindow
 from .notelog import NotesLog
@@ -82,6 +82,8 @@ class Controller(QObject):
         self._today = date.today()
         self._desktop = system.shell_token()
         self._hide_tip_shown = False
+        self.layout_key = screens.current_key()   # the monitor arrangement note positions are saved under
+        self.settling = False                     # monitors are changing: positions aren't the user's doing
 
         self._build_tray()
         self.reminders = ReminderService(self)
@@ -94,6 +96,16 @@ class Controller(QObject):
         self._shell = QTimer(self, interval=3_000)         # Explorer restarts
         self._shell.timeout.connect(self._check_shell)
         self._shell.start()
+
+        # Monitor plugged in or out, resolution or scaling changed: wait for Windows to finish moving
+        # windows around, then put every note where it belongs for the new arrangement.
+        self._relayout = QTimer(self, singleShot=True, interval=1500)
+        self._relayout.timeout.connect(self._apply_layout)
+        app.screenAdded.connect(self._watch_screen)
+        app.screenRemoved.connect(self._screens_changed)
+        app.primaryScreenChanged.connect(self._screens_changed)
+        for screen in app.screens():
+            self._watch_screen(screen, changed=False)
 
         if self.store.settings.autostart:
             try:
@@ -250,6 +262,30 @@ class Controller(QObject):
         if current and current != self._desktop:
             self._desktop = current
             self.recreate_windows()
+
+    # ------------------------------------------------------------------ monitors
+    def _watch_screen(self, screen, changed: bool = True) -> None:
+        screen.geometryChanged.connect(self._screens_changed)
+        if changed:
+            self._screens_changed()
+
+    def _screens_changed(self, *_) -> None:
+        self.settling = True
+        self._relayout.start()
+
+    def _apply_layout(self) -> None:
+        self.layout_key = screens.current_key()
+        for window in self.windows.values():
+            window.fit_to_screens()
+        QTimer.singleShot(1000, self, self._settled)
+
+    def _settled(self) -> None:
+        if self._relayout.isActive():   # the monitors changed again meanwhile
+            return
+        # Windows sometimes moves windows once more shortly after a display change; undo that too.
+        for window in self.windows.values():
+            window.fit_to_screens()
+        self.settling = False
 
     def quit(self) -> None:
         for window in self.windows.values():

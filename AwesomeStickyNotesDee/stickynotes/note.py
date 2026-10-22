@@ -5,22 +5,24 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QEvent, QMargins, QMarginsF, QPoint, QPointF,
                             QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer)
-from PySide6.QtGui import (QColor, QFont, QGuiApplication, QKeySequence, QLinearGradient, QPainter,
+from PySide6.QtGui import (QColor, QFont, QKeySequence, QLinearGradient, QPainter,
                            QPainterPath, QPalette, QPen, QPixmap, QRegion, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLayout,
                                QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
-from . import icons, shadow, system, theme
+from . import icons, screens, shadow, system, theme
 from .store import DEFAULT_FONT_SIZE, Note, Task, to_iso
 from .timeparse import day_label, extract_reminder, friendly
-from .widgets import (IconButton, InlineEdit, ProgressLine, ResizeGrip, TaskRow, add_action, add_font_list,
+from .widgets import (IconButton, InlineEdit, ProgressLine, ResizeEdge, ResizeGrip, TaskRow, add_action, add_font_list,
                       add_menu_label, add_saturation, add_stepper,
                       add_submenu, add_swatches, animate, animation, make_menu, pick_datetime, EXIT_MS, MOTION,
                       reminder_presets)
 
 MARGINS = QMargins(22, 16, 22, 30)      # transparent room around the card for the shadow
-CARD_PADDING = QMargins(8, 12, 12, 12)       # task rows add their own 12px grip gutter
+CARD_PADDING = QMargins(8, 0, 12, 12)        # task rows add their own 12px grip gutter
+HANDLE_BAND = 14                             # strip above the title holding the move handle (part of the header)
+EDGE_OUT, EDGE_IN, EDGE_CORNER = 6, 4, 12    # resize zones: px outside / inside the card, corner reach
 RADIUS = 16.0
 MIN_SIZE = QSize(280, 250)
 QWIDGETSIZE_MAX = 16777215
@@ -58,7 +60,8 @@ class ElidedLabel(QLabel):
 
 
 class Header(QWidget):
-    """Drag to move the note; click the title to rename it. Its buttons float over the top-right corner."""
+    """Drag to move the note (a dotted handle at the top shows where); click the title to rename it.
+    Its buttons float over the top-right corner."""
 
     def __init__(self, note_window: "NoteWindow"):
         super().__init__(note_window.card)
@@ -67,11 +70,23 @@ class Header(QWidget):
         self._manual: tuple[QPoint, QPoint] | None = None   # (press, window pos) when moving by hand
         self.actions: QWidget | None = None
         self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def resizeEvent(self, e):
         if self.actions:
             self.actions.adjustSize()
-            self.actions.move(self.width() - self.actions.width(), 0)
+            self.actions.move(self.width() - self.actions.width(), HANDLE_BAND)
+
+    def paintEvent(self, e):
+        # Six-dot handle centred on the card, like the grip on task rows; stronger while hovered.
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(self.win.pal.ink(0.30 + 0.20 * self.win._hover_t))
+        cx = self.win.card.width() / 2 - self.x()
+        for dx in (-5.5, 0.0, 5.5):
+            for dy in (-2.75, 2.75):
+                p.drawEllipse(QPointF(cx + dx, HANDLE_BAND / 2 + 1 + dy), 1.4, 1.4)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -344,7 +359,7 @@ class NoteWindow(QWidget):
         # header -----------------------------------------------------------
         self.header = Header(self)
         hl = QHBoxLayout(self.header)
-        hl.setContentsMargins(6, 0, 0, 0)
+        hl.setContentsMargins(6, HANDLE_BAND, 0, 0)
         hl.setSpacing(2)
         self.titles = QVBoxLayout()
         self.titles.setSpacing(0)
@@ -423,6 +438,11 @@ class NoteWindow(QWidget):
         lay.addWidget(self.footer)
 
         self.grip = ResizeGrip(self.card)
+        # Invisible zones along every side and corner of the card: drag any of them to resize.
+        E = Qt.Edge
+        self.resize_edges = {edges: ResizeEdge(edges, self) for edges in (
+            E.LeftEdge, E.RightEdge, E.TopEdge, E.BottomEdge, E.TopEdge | E.LeftEdge,
+            E.TopEdge | E.RightEdge, E.BottomEdge | E.LeftEdge, E.BottomEdge | E.RightEdge)}
 
         # Ctrl + = / Ctrl + - change the text size, Ctrl + 0 resets it (while the note has focus).
         for keys, delta in (("Ctrl+=", 1), ("Ctrl++", 1), ("Ctrl+-", -1)):
@@ -787,7 +807,7 @@ class NoteWindow(QWidget):
             return
         self.title_lbl.highlight = highlight
         self.title_lbl.update()
-        self.header.setCursor(Qt.CursorShape.IBeamCursor if on else Qt.CursorShape.ArrowCursor)
+        self.header.setCursor(Qt.CursorShape.IBeamCursor if on else Qt.CursorShape.OpenHandCursor)
         self.header.setToolTip("Click to rename" if on else "")
 
     def set_pin(self, mode: str) -> None:
@@ -871,14 +891,14 @@ class NoteWindow(QWidget):
         if not (animated and MOTION) or start == target:
             for w in content:
                 w.setVisible(not collapsed)
-            self.grip.setVisible(not collapsed)
+            self._show_resizers(not collapsed)
             self._lock_height(collapsed, target)
             self.resize(self.width(), target)
             return
 
         # Roll the card up/down: freeze the content where it is and let the moving bottom edge clip it.
         card_lay = self.card.layout()
-        self.grip.hide()
+        self._show_resizers(False)
         if not collapsed:
             for w in content:
                 w.show()
@@ -899,12 +919,41 @@ class NoteWindow(QWidget):
             self._lock_height(collapsed, target)
             self.resize(self.width(), target)
             card_lay.activate()
-            self.grip.setVisible(not collapsed)
+            self._show_resizers(not collapsed)
             self.update()
 
         self._collapse_anim = animation(self, 280, step, QEasingCurve.Type.OutCubic)
         self._collapse_anim.finished.connect(done)
         animate(self._collapse_anim, 0.0, 1.0)
+
+    def _show_resizers(self, on: bool) -> None:
+        """A collapsed note can only get wider or narrower, so only its left and right edges stay active."""
+        self.grip.setVisible(on)
+        for edges, zone in self.resize_edges.items():
+            zone.setVisible(on or edges in (Qt.Edge.LeftEdge, Qt.Edge.RightEdge))
+        self._place_resizers()
+
+    def _place_resizers(self) -> None:
+        c = self.card_rect().toRect()
+        out, inside, corner = EDGE_OUT, EDGE_IN, EDGE_CORNER
+        band, reach = out + inside, out + corner
+        left, top = c.left() - out, c.top() - out
+        right, bottom = c.left() + c.width() - inside, c.top() + c.height() - inside
+        far_x, far_y = c.left() + c.width() - corner, c.top() + c.height() - corner
+        side_y, side_h = c.top() + corner, max(0, c.height() - 2 * corner)
+        if self.resize_edges[Qt.Edge.TopEdge].isHidden():   # collapsed: the sides run the full height
+            side_y, side_h = c.top(), c.height()
+        E = Qt.Edge
+        for edges, rect in (
+                (E.LeftEdge, (left, side_y, band, side_h)),
+                (E.RightEdge, (right, side_y, band, side_h)),
+                (E.TopEdge, (c.left() + corner, top, max(0, c.width() - 2 * corner), band)),
+                (E.BottomEdge, (c.left() + corner, bottom, max(0, c.width() - 2 * corner), band)),
+                (E.TopEdge | E.LeftEdge, (left, top, reach, reach)),
+                (E.TopEdge | E.RightEdge, (far_x, top, reach, reach)),
+                (E.BottomEdge | E.LeftEdge, (left, far_y, reach, reach)),
+                (E.BottomEdge | E.RightEdge, (far_x, far_y, reach, reach))):
+            self.resize_edges[edges].setGeometry(*rect)
 
     def _collapsed_height(self) -> int:
         return (MARGINS.top() + MARGINS.bottom() + CARD_PADDING.top() + CARD_PADDING.bottom()
@@ -940,20 +989,27 @@ class NoteWindow(QWidget):
             pos = self.ctl.default_position(QSize(n.w, n.h))
             n.x, n.y = pos.x(), pos.y()
             self.store.update_note(n, emit=False)
-        rect = QRect(n.x, n.y, max(n.w, MIN_SIZE.width()), max(n.h, MIN_SIZE.height()))
-        if not any(s.availableGeometry().intersects(rect.adjusted(40, 40, -40, -40))
-                   for s in QGuiApplication.screens()):
-            area = QGuiApplication.primaryScreen().availableGeometry()
-            rect.moveTopLeft(area.topLeft() + QPoint(40, 40))
-        self.setGeometry(rect)
+        self.setGeometry(screens.place(n, self.ctl.layout_key, MARGINS, MIN_SIZE))
         self._apply_collapsed()
 
+    def fit_to_screens(self) -> None:
+        """Put the note back where it belongs for the monitors connected now."""
+        if self._collapsing():
+            return
+        rect = screens.place(self.note, self.ctl.layout_key, MARGINS, MIN_SIZE)
+        if self.note.collapsed:
+            rect.setHeight(self.height())
+        if rect != self.geometry():
+            self.setGeometry(rect)
+
     def _save_geometry(self) -> None:
+        if self.ctl.settling or screens.current_key() != self.ctl.layout_key:
+            return   # the monitors are changing: Windows is moving the note, not the user
         g = self.geometry()
-        changes = {"x": g.x(), "y": g.y(), "w": g.width()}
-        if not self.note.collapsed:
-            changes["h"] = g.height()
-        self.store.update_note(self.note, emit=False, **changes)
+        h = self.note.h if self.note.collapsed else g.height()
+        self.store.update_note(self.note, emit=False, x=g.x(), y=g.y(), w=g.width(), h=h,
+                               layouts=screens.remember(self.note, self.ctl.layout_key,
+                                                        QRect(g.x(), g.y(), g.width(), h)))
 
     def moveEvent(self, e):
         self._geo_timer.start()
@@ -962,6 +1018,7 @@ class NoteWindow(QWidget):
         cw = self.width() - MARGINS.left() - MARGINS.right()
         ch = self.height() - MARGINS.top() - MARGINS.bottom()
         self.grip.move(cw - self.grip.width() - 3, ch - self.grip.height() - 3)
+        self._place_resizers()
         self._geo_timer.start()
 
     def showEvent(self, e):
@@ -979,6 +1036,7 @@ class NoteWindow(QWidget):
     def _set_hover(self, value) -> None:
         self._hover_t = float(value)
         self.update()
+        self.header.update()
 
     def enterEvent(self, e):
         animate(self._hover_anim, self._hover_t, 1.0)

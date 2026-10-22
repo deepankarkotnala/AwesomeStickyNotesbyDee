@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QRectF, QSize, Qt, QVariantAnimation,
+from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QVariantAnimation,
                             Signal)
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen, QTextLayout,
                            QTextOption)
@@ -229,35 +229,71 @@ class ProgressLine(QWidget):
             p.drawRoundedRect(QRectF(0, 0, max(4.0, r.width() * self._shown), r.height()), 2, 2)
 
 
-class ResizeGrip(QWidget):
-    def __init__(self, parent=None):
+class ResizeEdge(QWidget):
+    """An invisible zone along a side or corner of a frameless window; dragging it resizes from there."""
+
+    def __init__(self, edges: Qt.Edge, parent=None):
         super().__init__(parent)
-        self.color = QColor(0, 0, 0, 60)
-        self.setFixedSize(14, 14)
-        self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        self.edges = edges
+        self._manual: tuple[QPoint, QRect] | None = None
+        E, C = Qt.Edge, Qt.CursorShape
+        if edges in (E.LeftEdge, E.RightEdge):
+            cursor = C.SizeHorCursor
+        elif edges in (E.TopEdge, E.BottomEdge):
+            cursor = C.SizeVerCursor
+        elif edges in (E.TopEdge | E.LeftEdge, E.BottomEdge | E.RightEdge):
+            cursor = C.SizeFDiagCursor
+        else:
+            cursor = C.SizeBDiagCursor
+        self.setCursor(cursor)
 
     def paintEvent(self, e):
-        p = QPainter(self)
-        icons.paint(p, "grip", QRectF(1, 1, 12, 12), self.color)
+        # Not quite transparent: fully transparent pixels of a translucent window let clicks fall through.
+        QPainter(self).fillRect(self.rect(), QColor(0, 0, 0, 1))
 
     def mousePressEvent(self, e):
         self._manual = None
         if e.button() != Qt.MouseButton.LeftButton:
             return
         handle = self.window().windowHandle()
-        if handle and handle.startSystemResize(Qt.Edge.RightEdge | Qt.Edge.BottomEdge):
+        if handle and handle.startSystemResize(self.edges):
             return
         # macOS has no system resize for frameless windows: follow the mouse ourselves.
-        self._manual = (e.globalPosition().toPoint(), self.window().size())
+        self._manual = (e.globalPosition().toPoint(), self.window().geometry())
 
     def mouseMoveEvent(self, e):
-        if getattr(self, "_manual", None):
-            origin, size = self._manual
-            delta = e.globalPosition().toPoint() - origin
-            self.window().resize(size.width() + delta.x(), size.height() + delta.y())
+        if not self._manual:
+            return
+        origin, r = self._manual
+        delta = e.globalPosition().toPoint() - origin
+        low = self.window().minimumSize()
+        g = QRect(r)
+        E = Qt.Edge
+        if self.edges & E.LeftEdge:
+            g.setLeft(min(r.left() + delta.x(), r.right() - low.width() + 1))
+        if self.edges & E.RightEdge:
+            g.setRight(max(r.right() + delta.x(), r.left() + low.width() - 1))
+        if self.edges & E.TopEdge:
+            g.setTop(min(r.top() + delta.y(), r.bottom() - low.height() + 1))
+        if self.edges & E.BottomEdge:
+            g.setBottom(max(r.bottom() + delta.y(), r.top() + low.height() - 1))
+        self.window().setGeometry(g)
 
     def mouseReleaseEvent(self, e):
         self._manual = None
+
+
+class ResizeGrip(ResizeEdge):
+    """The visible dotted grip in the bottom-right corner."""
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Edge.RightEdge | Qt.Edge.BottomEdge, parent)
+        self.color = QColor(0, 0, 0, 60)
+        self.setFixedSize(14, 14)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        icons.paint(p, "grip", QRectF(1, 1, 12, 12), self.color)
 
 
 class InlineEdit(QLineEdit):

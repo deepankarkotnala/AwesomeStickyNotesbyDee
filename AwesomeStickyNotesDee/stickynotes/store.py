@@ -22,7 +22,7 @@ LEGACY_NAME = "StickyNotesDee"         # folder name used by the first versions
 DB_FOLDER = "StickyNotesDB"
 OLD_DB_FOLDERS = ("DeeStickyNotesDB",)   # earlier names of DB_FOLDER, renamed automatically
 DB_FILE = "notes.db"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DEFAULT_FONT_SIZE = 10.5
 DEFAULT_SATURATION = 0.5
 
@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS notes (
     font_family TEXT    NOT NULL DEFAULT '',
     font_size   REAL    NOT NULL DEFAULT 10.5,
     saturation  REAL    NOT NULL DEFAULT 0.5,
-    deleted_at  TEXT
+    deleted_at  TEXT,
+    layouts     TEXT    NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS tasks (
     id        TEXT PRIMARY KEY,
@@ -75,6 +76,7 @@ MIGRATIONS = {
     4: ["ALTER TABLE notes ADD COLUMN deleted_at TEXT",
         "ALTER TABLE tasks ADD COLUMN deleted_at TEXT"],
     5: ["ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"],
+    6: ["ALTER TABLE notes ADD COLUMN layouts TEXT NOT NULL DEFAULT '{}'"],
 }
 
 
@@ -235,6 +237,7 @@ class Note:
     font_size: float = DEFAULT_FONT_SIZE
     saturation: float = DEFAULT_SATURATION  # 0 = barely tinted, 0.5 = classic pastel, 1 = full colour
     deleted_at: str | None = None   # set while it sits in the Recycle Bin
+    layouts: str = "{}"             # JSON: position per monitor arrangement (see screens.py)
 
     @property
     def deleted_dt(self) -> datetime | None:

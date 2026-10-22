@@ -25,8 +25,8 @@ For a console with error output, run `.venv\Scripts\python AwesomeStickyNotes.py
 | Edit a task | Double-click it. Clearing the text deletes the task (it goes to the Recycle Bin) |
 | Pin a task to the top | Hover over it and click the **pin**. Pinned tasks stay in a **Pinned** section at the top of the note, above everything else. Click the pin again to unpin |
 | Reorder tasks | Drag a task up or down (a grip appears on its left on hover). Works within its section, so pinned tasks are reordered among themselves and always stay above the rest. Completed tasks stay in the order you finished them |
-| Move a note | Drag its header |
-| Resize a note | Drag the dotted grip in the bottom-right corner |
+| Move a note | Drag the dotted handle at the top, or anywhere on the header (the pointer turns into a hand) |
+| Resize a note | Drag any edge or corner |
 | Rename a note | Click its title |
 | Text size | **⋯** → Text → Size, or Ctrl + mouse wheel over the tasks, or Ctrl + = / Ctrl + − (Ctrl + 0 resets) |
 | Font | **⋯** → Text → Font. **Use this font & size on all notes** copies it to every note |
@@ -43,6 +43,7 @@ For a console with error output, run `.venv\Scripts\python AwesomeStickyNotes.py
 ### Where notes sit
 - **On desktop** (default): the note sits on the desktop layer. Other windows cover it, and **Win+D / Show desktop** reveals it instead of minimising it.
 - **Always on top**: the note floats above every window.
+- **Changing monitors**: each note remembers where it was for every monitor setup (laptop screen alone, docked to an external monitor, and so on). When you plug in or unplug a monitor, notes go back to where you left them in that setup. In a setup a note hasn't been in before, it stays on the same monitor if that monitor is still connected, otherwise it moves to the same spot on the main monitor.
 
 ### Recycle Bin
 Deleting a note, or a task with its **×** button, moves it to the Recycle Bin instead of erasing it. Items stay there until you restore them or empty the bin.
@@ -81,6 +82,7 @@ setup.bat               builds .venv from requirements.txt
 stickynotes/
   app.py               tray icon, note windows, single instance, day roll-over
   note.py              the desktop sticky note window
+  screens.py           note positions remembered per monitor setup
   widgets.py           check circle, task row, menus, toggles, pills
   hub.py               notes overview, completed history, reminders, Recycle Bin, settings
   reminders.py         reminder scheduler and toast pop-ups
