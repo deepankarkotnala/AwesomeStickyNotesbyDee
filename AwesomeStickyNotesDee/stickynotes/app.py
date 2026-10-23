@@ -5,7 +5,7 @@ import getpass
 import sys
 from datetime import date
 
-from PySide6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
@@ -161,6 +161,10 @@ class Controller(QObject):
         self.windows.clear()
         self.sync_windows()
 
+    def cards(self, exclude: NoteWindow | None = None) -> list[QRect]:
+        """Where the cards of the open notes are (or are sliding to), so a note can keep clear of them."""
+        return [w.card_target() for w in self.windows.values() if w is not exclude and w.isVisible()]
+
     def default_position(self, size: QSize) -> QPoint:
         area = QGuiApplication.primaryScreen().availableGeometry()
         step = 36 * len(self.windows)
@@ -275,17 +279,22 @@ class Controller(QObject):
 
     def _apply_layout(self) -> None:
         self.layout_key = screens.current_key()
-        for window in self.windows.values():
-            window.fit_to_screens()
+        self._fit_all()
         QTimer.singleShot(1000, self, self._settled)
 
     def _settled(self) -> None:
         if self._relayout.isActive():   # the monitors changed again meanwhile
             return
         # Windows sometimes moves windows once more shortly after a display change; undo that too.
-        for window in self.windows.values():
-            window.fit_to_screens()
+        self._fit_all()
         self.settling = False
+
+    def _fit_all(self) -> None:
+        """Put every note where it belongs for the monitors connected now, one after another so each
+        keeps clear of those already placed."""
+        placed: list[QRect] = []
+        for window in self.windows.values():
+            placed.append(window.fit_to_screens(placed))
 
     def quit(self) -> None:
         for window in self.windows.values():

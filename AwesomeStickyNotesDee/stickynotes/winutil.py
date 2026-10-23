@@ -10,7 +10,7 @@ import sys
 from ctypes import wintypes
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 
 from . import APP_ID, SLUG
 
@@ -22,6 +22,8 @@ LEGACY_RUN_VALUES = ("StickyNotesDee", "AwesomeStickyNotesDee")   # earlier name
 HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER = 0x0001, 0x0002, 0x0010, 0x0200
 GWLP_HWNDPARENT = -8
+WM_NCHITTEST, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE = 0x0084, 0x0231, 0x0232
+HTTRANSPARENT = -1
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
@@ -32,6 +34,7 @@ user32.SetWindowPos.restype = wintypes.BOOL
 _set_long = getattr(user32, "SetWindowLongPtrW", None) or user32.SetWindowLongW
 _set_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
 _set_long.restype = ctypes.c_void_p
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 
 
 def _hwnd(value: int) -> wintypes.HWND:
@@ -61,6 +64,38 @@ def window_flags(kind: str) -> Qt.WindowType:
 
 def prepare(widget) -> None:
     """Platform tweaks before a note/toast window is shown (nothing needed on Windows)."""
+
+
+def _message(event_type, message) -> wintypes.MSG | None:
+    return wintypes.MSG.from_address(int(message)) if bytes(event_type) == b"windows_generic_MSG" else None
+
+
+def move_phase(event_type, message) -> str | None:
+    """From a window's nativeEvent: "start" / "end" when the user starts / stops dragging the window to
+    move or resize it (Windows runs its own loop for that, so Qt never sees the mouse button go up)."""
+    msg = _message(event_type, message)
+    kind = msg.message if msg else None
+    return "start" if kind == WM_ENTERSIZEMOVE else "end" if kind == WM_EXITSIZEMOVE else None
+
+
+def click_through(widget, event_type, message, solid: QRect) -> int | None:
+    """From a window's nativeEvent: when Windows asks what lies under the mouse at a point outside
+    `solid` (window coordinates), the reply that hands the mouse to the window beneath instead.
+
+    A translucent window catches the mouse on every pixel that isn't fully transparent, so the faint
+    edge of a note's shadow would otherwise block clicks on the neighbouring note it falls across.
+    (The hand-over only reaches windows of this app; anything else beneath behaves as before.)
+    """
+    msg = _message(event_type, message)
+    if msg is None or msg.message != WM_NCHITTEST:
+        return None
+    frame = wintypes.RECT()
+    if not user32.GetWindowRect(msg.hWnd, ctypes.byref(frame)):
+        return None
+    dpr = widget.devicePixelRatioF()
+    x, y = ctypes.c_short(msg.lParam & 0xFFFF).value, ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+    inside = solid.contains(QPoint(int((x - frame.left) / dpr), int((y - frame.top) / dpr)))
+    return None if inside else HTTRANSPARENT
 
 
 def shell_token() -> int:

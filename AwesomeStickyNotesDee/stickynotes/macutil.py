@@ -59,6 +59,14 @@ def prepare(widget) -> None:
     widget.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
 
 
+def move_phase(event_type, message) -> str | None:
+    return None   # not reported on macOS: notes tidy up once they have stopped moving instead
+
+
+def click_through(widget, event_type, message, solid) -> int | None:
+    return None   # not done on macOS yet: the faint edge of a shadow still catches clicks there
+
+
 def shell_token() -> int:
     return 0   # nothing like an Explorer restart to watch for on macOS
 

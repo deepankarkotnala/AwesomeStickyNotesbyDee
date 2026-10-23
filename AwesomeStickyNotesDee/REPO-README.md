@@ -81,6 +81,7 @@ If the app doesn't start, the error appears in a dialog and is saved to `startup
 - **On desktop** (default): the note sits on the desktop layer. Other windows cover it, and **Win+D** / **Show desktop** reveals it instead of minimising it.
 - **Always on top**: the note floats above every window.
 - **Changing monitors**: each note remembers where it was for every monitor setup (laptop screen alone, docked to an external monitor, and so on). When you plug in or unplug a monitor, notes go back to where you left them in that setup. In a setup a note hasn't been in before, it stays on the same monitor if that monitor is still connected, otherwise it moves to the same spot on the main monitor.
+- **Tidy grid**: notes never overlap. When you let go of a note after moving or resizing it, it slides onto an invisible grid on its monitor, with an even gap between neighbouring notes. If it lands on another note, it moves to the nearest free spot. If you drag an edge into a neighbour, that edge stops at the neighbour. New, reopened and expanded notes find a free spot the same way. Only when every monitor is full do notes overlap.
 
 Change this for one note under **⋯** → Position, or for all notes under **Settings → Where notes live**.
 
@@ -168,6 +169,7 @@ The app always runs from `.venv`, so installing or upgrading other Pythons or li
 
 - **On desktop** (default): notes stay just above the desktop. Apps cover them, **Show Desktop** (F11 or the spread-fingers gesture) reveals them, and they appear on every Space.
 - **Always on top**: notes float above all windows.
+- **Tidy grid**: notes never overlap. When you let go of a note after moving or resizing it, it slides onto an invisible grid on its monitor, with an even gap between neighbouring notes. If it lands on another note, it moves to the nearest free spot. If you drag an edge into a neighbour, that edge stops at the neighbour. New, reopened and expanded notes find a free spot the same way. Only when every monitor is full do notes overlap.
 
 Change this for one note under **⋯** → Position, or for all notes under **Settings → Where notes live**.
 
@@ -213,6 +215,7 @@ stickynotes/                           identical in both folders
   app.py         tray / menu-bar icon, note windows, single instance, day roll-over
   note.py        the desktop sticky note window
   screens.py     note positions remembered per monitor setup
+  grid.py        snapping notes to a grid, keeping them from overlapping
   widgets.py     check circle, task row, menus, toggles, pills
   hub.py         notes overview, completed history, reminders, Recycle Bin, settings
   reminders.py   reminder scheduler and pop-up cards

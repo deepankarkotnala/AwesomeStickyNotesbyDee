@@ -5,13 +5,13 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QEvent, QMargins, QMarginsF, QPoint, QPointF,
                             QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer)
-from PySide6.QtGui import (QColor, QFont, QKeySequence, QLinearGradient, QPainter,
+from PySide6.QtGui import (QColor, QFont, QGuiApplication, QKeySequence, QLinearGradient, QPainter,
                            QPainterPath, QPalette, QPen, QPixmap, QRegion, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLayout,
                                QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
-from . import icons, screens, shadow, system, theme
+from . import grid, icons, screens, shadow, system, theme
 from .store import DEFAULT_FONT_SIZE, Note, Task, to_iso
 from .timeparse import day_label, extract_reminder, friendly
 from .widgets import (IconButton, InlineEdit, ProgressLine, ResizeEdge, ResizeGrip, TaskRow, add_action, add_font_list,
@@ -23,8 +23,10 @@ MARGINS = QMargins(22, 16, 22, 30)      # transparent room around the card for t
 CARD_PADDING = QMargins(8, 0, 12, 12)        # task rows add their own 12px grip gutter
 HANDLE_BAND = 14                             # strip above the title holding the move handle (part of the header)
 EDGE_OUT, EDGE_IN, EDGE_CORNER = 6, 4, 12    # resize zones: px outside / inside the card, corner reach
+SHADOW_ONLY = MARGINS - QMargins(EDGE_OUT, EDGE_OUT, EDGE_OUT, EDGE_OUT)   # clicks here fall through
 RADIUS = 16.0
 MIN_SIZE = QSize(280, 250)
+GLIDE_MS = 220                               # sliding onto the grid after a move or resize
 QWIDGETSIZE_MAX = 16777215
 
 
@@ -91,6 +93,7 @@ class Header(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self._press = e.globalPosition().toPoint()
+            self.win.stop_glide()
 
     def mouseMoveEvent(self, e):
         pos = e.globalPosition().toPoint()
@@ -107,6 +110,8 @@ class Header(QWidget):
             self.win.set_title_hover(self.win.over_title(e.position().toPoint()))
 
     def mouseReleaseEvent(self, e):
+        if self._manual:
+            self.win.settle(align=True)
         self._manual = None
         pressed, self._press = self._press, None
         # A click (not a drag) on the title text starts renaming.
@@ -322,7 +327,11 @@ class NoteWindow(QWidget):
         self._hover_anim = animation(self, 220, self._set_hover)
         self._exact_shadow: tuple | None = None   # only needed for small (collapsed) cards
         self._geo_timer = QTimer(self, singleShot=True, interval=400)
-        self._geo_timer.timeout.connect(self._save_geometry)
+        self._geo_timer.timeout.connect(self._geometry_idle)
+        self._glide_anim = QPropertyAnimation(self, b"geometry", self)
+        self._glide_anim.setDuration(GLIDE_MS)
+        self._glide_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._dragged_from: QRect | None = None  # geometry when the user began moving/resizing it
         self._collapse_anim = None
         self._fade_anim = None
         self._faded_in = False
@@ -443,6 +452,8 @@ class NoteWindow(QWidget):
         self.resize_edges = {edges: ResizeEdge(edges, self) for edges in (
             E.LeftEdge, E.RightEdge, E.TopEdge, E.BottomEdge, E.TopEdge | E.LeftEdge,
             E.TopEdge | E.RightEdge, E.BottomEdge | E.LeftEdge, E.BottomEdge | E.RightEdge)}
+        for zone in (self.grip, *self.resize_edges.values()):
+            zone.released.connect(lambda before: self.settle(before, align=True))
 
         # Ctrl + = / Ctrl + - change the text size, Ctrl + 0 resets it (while the note has focus).
         for keys, delta in (("Ctrl+=", 1), ("Ctrl++", 1), ("Ctrl+-", -1)):
@@ -894,6 +905,8 @@ class NoteWindow(QWidget):
             self._show_resizers(not collapsed)
             self._lock_height(collapsed, target)
             self.resize(self.width(), target)
+            if animated and not collapsed:
+                self.settle()
             return
 
         # Roll the card up/down: freeze the content where it is and let the moving bottom edge clip it.
@@ -921,6 +934,8 @@ class NoteWindow(QWidget):
             card_lay.activate()
             self._show_resizers(not collapsed)
             self.update()
+            if not collapsed:
+                self.settle()
 
         self._collapse_anim = animation(self, 280, step, QEasingCurve.Type.OutCubic)
         self._collapse_anim.finished.connect(done)
@@ -991,16 +1006,86 @@ class NoteWindow(QWidget):
             self.store.update_note(n, emit=False)
         self.setGeometry(screens.place(n, self.ctl.layout_key, MARGINS, MIN_SIZE))
         self._apply_collapsed()
+        rect, others = self.geometry(), self.ctl.cards(exclude=self)
+        if self._tidy(rect, others) != rect:   # off the grid or on another note: line it up as it moves
+            self.setGeometry(self._tidy(rect, others, align=True))
 
-    def fit_to_screens(self) -> None:
-        """Put the note back where it belongs for the monitors connected now."""
+    def fit_to_screens(self, others: list[QRect]) -> QRect:
+        """Put the note back where it belongs for the monitors connected now, clear of the `others`
+        cards. Returns where its card ends up."""
         if self._collapsing():
-            return
+            return self.card_target()
+        self.stop_glide()
         rect = screens.place(self.note, self.ctl.layout_key, MARGINS, MIN_SIZE)
         if self.note.collapsed:
             rect.setHeight(self.height())
+        rect = self._tidy(rect, others)
         if rect != self.geometry():
             self.setGeometry(rect)
+        return rect.marginsRemoved(MARGINS)
+
+    def _tidy(self, rect: QRect, others: list[QRect], before: QRect | None = None, align: bool = False) -> QRect:
+        """The window geometry `rect` moved onto the grid of its screen, clear of the `others` cards."""
+        card = grid.settle(rect.marginsRemoved(MARGINS), others, MIN_SIZE.shrunkBy(MARGINS),
+                           fixed_height=self.note.collapsed,
+                           before=before.marginsRemoved(MARGINS) if before is not None else None, align=align)
+        return card.marginsAdded(MARGINS)
+
+    def settle(self, before: QRect | None = None, align: bool = False) -> bool:
+        """Slide the note onto the grid of its screen, clear of the other notes; True if it has to move.
+        `before` is its geometry when the user began resizing it, so the dragged edges give way.
+        `align` lines its edges up with nearby notes' edges (when the user has just let go of it)."""
+        if self._collapsing() or self.ctl.settling:
+            return False
+        rect = self._tidy(self.geometry(), self.ctl.cards(exclude=self), before, align)
+        if rect == self.geometry():
+            return False
+        self.stop_glide()
+        if MOTION:
+            self._glide_anim.setStartValue(self.geometry())
+            self._glide_anim.setEndValue(rect)
+            self._glide_anim.start()
+        else:
+            self.setGeometry(rect)
+        return True
+
+    def stop_glide(self) -> None:
+        self._glide_anim.stop()
+
+    def _gliding(self) -> bool:
+        return self._glide_anim.state() == QAbstractAnimation.State.Running
+
+    def card_target(self) -> QRect:
+        """Where the card is, or will be once a slide or collapse under way has finished."""
+        rect = QRect(self._glide_anim.endValue()) if self._gliding() else self.geometry()
+        if self.note.collapsed:
+            rect.setHeight(self._collapsed_height())
+        elif self._collapsing():
+            rect.setHeight(max(self.note.h, MIN_SIZE.height()))
+        return rect.marginsRemoved(MARGINS)
+
+    def nativeEvent(self, event_type, message):
+        reply = system.click_through(self, event_type, message, self.rect().marginsRemoved(SHADOW_ONLY))
+        if reply is not None:
+            return True, reply
+        # Windows moves and resizes the note in a loop of its own; tidy up as soon as the user lets go.
+        phase = system.move_phase(event_type, message)
+        if phase == "start":
+            self.stop_glide()
+            self._dragged_from = self.geometry()
+        elif phase == "end" and self._dragged_from is not None:
+            before, self._dragged_from = self._dragged_from, None
+            QTimer.singleShot(0, self, lambda: self.settle(before, align=True))
+        return super().nativeEvent(event_type, message)
+
+    def _geometry_idle(self) -> None:
+        """The note has stopped moving. Tidy it up if it was moved some other way (on macOS, a drag
+        ends here), then remember where it is."""
+        busy = (self._dragged_from is not None or self._gliding()
+                or QGuiApplication.mouseButtons() != Qt.MouseButton.NoButton)
+        if not busy and self.settle():
+            return   # saved once it has slid into place
+        self._save_geometry()
 
     def _save_geometry(self) -> None:
         if self.ctl.settling or screens.current_key() != self.ctl.layout_key:

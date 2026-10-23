@@ -231,6 +231,7 @@ class ProgressLine(QWidget):
 
 class ResizeEdge(QWidget):
     """An invisible zone along a side or corner of a frameless window; dragging it resizes from there."""
+    released = Signal(QRect)    # after a resize we drove ourselves: the window's geometry when it began
 
     def __init__(self, edges: Qt.Edge, parent=None):
         super().__init__(parent)
@@ -280,7 +281,9 @@ class ResizeEdge(QWidget):
         self.window().setGeometry(g)
 
     def mouseReleaseEvent(self, e):
-        self._manual = None
+        manual, self._manual = self._manual, None
+        if manual:
+            self.released.emit(manual[1])
 
 
 class ResizeGrip(ResizeEdge):
