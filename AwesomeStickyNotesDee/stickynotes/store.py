@@ -17,7 +17,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from . import repeat
-from .system import fallback_data_dir
+from .system import app_bundle, fallback_data_dir
 
 LEGACY_NAME = "StickyNotesDee"         # folder name used by the first versions
 DB_FOLDER = "StickyNotesDB"
@@ -162,8 +162,8 @@ def data_dir() -> Path:
     override = os.environ.get("STICKYNOTES_DATA_DIR")
     if override:
         candidates = [Path(override)]
-    elif getattr(sys, "frozen", False) and sys.platform == "darwin":
-        candidates = [fallback_data_dir()]   # never write inside a signed .app bundle
+    elif sys.platform == "darwin" and (getattr(sys, "frozen", False) or app_bundle() is not None):
+        candidates = [fallback_data_dir()]   # never write inside an .app: it may be read-only or replaced
     else:
         candidates = [_current_db_folder(), fallback_data_dir()]
     for path in candidates:

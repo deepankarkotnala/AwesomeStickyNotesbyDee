@@ -182,6 +182,10 @@ def fallback_data_dir() -> Path:
     return Path(os.environ.get("APPDATA") or Path.home()) / SLUG
 
 
+def app_bundle() -> Path | None:
+    return None   # app bundles are a macOS thing
+
+
 # ---------------------------------------------------------------- autostart
 def launch_command() -> str:
     if getattr(sys, "frozen", False):  # packaged with PyInstaller

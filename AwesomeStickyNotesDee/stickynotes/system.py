@@ -15,6 +15,7 @@ activate_app()              bring the app to the front before showing a window
 chime()                     reminder sound
 open_folder(path)           reveal a folder in Explorer / Finder
 fallback_data_dir()         per-user data folder used if the app folder is read-only
+app_bundle()                the macOS .app the code runs from, else None
 set_autostart(on), autostart_enabled()   start with Windows / at macOS login
 """
 import sys
@@ -28,16 +29,17 @@ AUTOSTART_LABEL = "Open at login" if IS_MAC else "Start with Windows"
 SHOW_DESKTOP = "Show Desktop (F11)" if IS_MAC else "Win+D"
 
 if IS_MAC:
-    from .macutil import (LAUNCHER, activate_app, animations_enabled, autostart_enabled, chime, click_through,
-                          configure_app, fallback_data_dir, move_phase, open_folder, pin_to_desktop, prepare,
-                          remove_frame, set_autostart, set_caption_color, set_topmost, shell_token,
-                          window_flags)
+    from .macutil import (LAUNCHER, activate_app, animations_enabled, app_bundle, autostart_enabled, chime,
+                          click_through, configure_app, fallback_data_dir, move_phase, open_folder,
+                          pin_to_desktop, prepare, remove_frame, set_autostart, set_caption_color, set_topmost,
+                          shell_token, window_flags)
 else:
-    from .winutil import (LAUNCHER, activate_app, animations_enabled, autostart_enabled, chime, click_through,
-                          configure_app, fallback_data_dir, move_phase, open_folder, pin_to_desktop, prepare,
-                          remove_frame, set_autostart, set_caption_color, set_topmost, shell_token,
-                          window_flags)
+    from .winutil import (LAUNCHER, activate_app, animations_enabled, app_bundle, autostart_enabled, chime,
+                          click_through, configure_app, fallback_data_dir, move_phase, open_folder,
+                          pin_to_desktop, prepare, remove_frame, set_autostart, set_caption_color, set_topmost,
+                          shell_token, window_flags)
 
-__all__ = ["AUTOSTART_LABEL", "IS_MAC", "IS_WINDOWS", "SHOW_DESKTOP", "TRAY", "LAUNCHER", "activate_app", "animations_enabled", "autostart_enabled", "chime", "click_through",
+__all__ = ["AUTOSTART_LABEL", "IS_MAC", "IS_WINDOWS", "SHOW_DESKTOP", "TRAY", "LAUNCHER", "activate_app",
+           "animations_enabled", "app_bundle", "autostart_enabled", "chime", "click_through",
            "configure_app", "fallback_data_dir", "move_phase", "open_folder", "pin_to_desktop", "prepare", "remove_frame",
            "set_autostart", "set_caption_color", "set_topmost", "shell_token", "window_flags"]

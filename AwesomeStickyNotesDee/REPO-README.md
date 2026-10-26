@@ -23,7 +23,7 @@ AwesomeStickyNotesDee/      Windows edition
 AwesomeStickyNotes-Mac/     macOS edition
 ```
 
-Each folder is a complete copy of the app and has its own README. The `stickynotes/` package inside them is identical; only the launcher, the setup script and `requirements.txt` differ.
+Each folder is a complete copy of the app and has its own README. The `stickynotes/` package inside them is identical; only the launchers and `requirements.txt` differ. The Mac folder also builds **`Awesome Sticky Notes.app`**, delivered as `Awesome Sticky Notes.zip`.
 
 ---
 
@@ -121,10 +121,10 @@ The result is `dist\AwesomeStickyNotes.exe`. **Start with Windows** registers wh
 
 ## macOS edition
 
-Everything in this half happens in the **`AwesomeStickyNotes-Mac`** folder.
+Everything in this half happens in the **`AwesomeStickyNotes-Mac`** folder. It has the same features as the Windows edition, and runs as an app you double-click: **Awesome Sticky Notes.app**.
 
 > [!NOTE]
-> The macOS edition was written and checked on Windows by running its macOS code paths there. It has not yet been run on a real Mac. These parts still need confirming on one: the desktop window level, the menu-bar-only mode, the Reduce Motion check, the LaunchAgent, and `setup.command` with the hand-over to `.venv`. Everything else is the same Qt code as the tested Windows app.
+> The macOS edition was built and tested on Windows: the app's launcher was run under bash with stand-ins for the macOS tools, and the app's code was run from inside the built app with its macOS code paths switched on. It has not yet been run on a real Mac. These parts still need confirming on one: double-clicking the app and its first-run setup, including the security prompt; the desktop window level, the menu-bar-only mode and the Reduce Motion check; and the LaunchAgent for Open at login.
 
 ### Requirements
 
@@ -133,23 +133,19 @@ Everything in this half happens in the **`AwesomeStickyNotes-Mac`** folder.
 
 ### Install
 
-1. Clone or download this repository.
-2. Open the `AwesomeStickyNotes-Mac` folder and double-click **`setup.command`** in Finder, or run `bash setup.command` in Terminal from that folder.
+1. Copy **`Awesome Sticky Notes.zip`** from the `AwesomeStickyNotes-Mac` folder to the Mac (AirDrop, USB stick, cloud drive or email). Copy the zip, not an unzipped folder: the zip keeps the app's launcher marked as a program, and a folder copied from Windows loses that, so macOS would refuse to open it.
+2. Double-click the zip to unzip it, and drag **Awesome Sticky Notes** into **Applications**.
+3. Double-click the app. It isn't signed with an Apple developer certificate, so the first time macOS blocks it. On macOS 13 or 14, right-click the app, choose **Open**, then click **Open**. On macOS 15 and later, open **System Settings → Privacy & Security** and click **Open Anyway**. You only do this once.
 
-`setup.command` builds the app's own Python environment in `.venv` using the newest Python 3.10–3.14 it finds. It installs the exact library versions in `requirements.txt`: PySide6 (Qt) and PyObjC's Cocoa bridge. Without PyObjC the app still runs, but notes behave like ordinary windows instead of sitting on the desktop layer, and the app shows a Dock icon.
-
-The first time you open either `.command` file, you may need to do two things:
-
-- If Finder says the file isn't executable (common after downloading a ZIP), run `chmod +x *.command` once in the folder.
-- If macOS blocks the file as coming from an unidentified developer, right-click it, choose **Open**, then confirm **Open**. On macOS 15 and later, go to **System Settings → Privacy & Security** and click **Open Anyway** instead.
+The first start sets the app up. It finds Python 3.10–3.14 from python.org or Homebrew (if there is none, it offers to open python.org). It then builds its own Python environment in `~/Library/Application Support/AwesomeStickyNotes/python`, with the exact library versions in `requirements.txt`: PySide6 (Qt) and PyObjC's Cocoa bridge. That needs the internet and takes a minute or two; a notification says it's under way. After that the app starts at once.
 
 ### Run
 
-Double-click **`Start Awesome Sticky Notes.command`** in Finder, or run `python3 AwesomeStickyNotes.py` in Terminal (it hands over to `.venv`).
+Double-click **Awesome Sticky Notes** in Applications, or open it from Launchpad or Spotlight.
 
-The app runs from the **menu bar**: look for the checklist icon at the top right. It has no Dock icon. Only one copy runs at a time. Starting it again brings your notes forward.
+The app runs from the **menu bar**: look for the checklist icon at the top right. It has no Dock icon. Only one copy runs at a time; opening it again brings your notes forward.
 
-The app always runs from `.venv`, so installing or upgrading other Pythons or libraries can't break it. If the Python that `.venv` was built from is removed, the app says so when it starts; run `setup.command` again. Startup errors appear in an alert and are saved to `startup-error.log` in the app folder.
+The app always runs in its own Python environment, so installing or upgrading other Pythons or libraries can't break it. A newer version of the app that needs different libraries sets them up again the first time it opens. If setup fails, the app says so and keeps a log in `~/Library/Logs/AwesomeStickyNotes`, along with any start-up errors.
 
 ### Using it on macOS
 
@@ -193,28 +189,29 @@ Change this for one note under **⋯** → Position, or for all notes under **Se
 
 ### Open at login
 
-Turn on **Settings → Open at login**. This adds a LaunchAgent at `~/Library/LaunchAgents/com.dee.awesomestickynotes.plist`, which runs the app from its folder with the Python in `.venv`. If you move the folder, start the app once from its new location and the LaunchAgent is updated to match.
+Turn on **Settings → Open at login**. This adds a LaunchAgent at `~/Library/LaunchAgents/com.dee.awesomestickynotes.plist` that opens the app by its bundle identifier when you log in, so it keeps working if you move the app.
 
 ### Your data on macOS
 
-Notes are stored in SQLite at **`StickyNotesDB/notes.db`** inside the app folder, with a backup (`notes.bak.db`) made every time the app starts. Items in the Recycle Bin stay in the database, marked with a `deleted_at` time, until the bin is emptied. The folder also holds the same never-shrinking task log as on Windows: `notes-log.txt`, `notes-log.xlsx` (opens in Excel or Numbers) and `notes-log.json`.
+Notes are stored in SQLite at **`~/Library/Application Support/AwesomeStickyNotes/notes.db`**, with a backup (`notes.bak.db`) made every time the app starts, never inside the app itself. Replacing the app with a newer version keeps them. Items in the Recycle Bin stay in the database, marked with a `deleted_at` time, until the bin is emptied. The folder also holds the same never-shrinking task log as on Windows: `notes-log.txt`, `notes-log.xlsx` (opens in Excel or Numbers) and `notes-log.json`. **Settings → Data → Open folder** shows it in Finder.
 
-If the folder isn't writable, the database goes to `~/Library/Application Support/AwesomeStickyNotes` instead. `StickyNotesDB/` is listed in `.gitignore`, so your notes never end up in the repository.
+### Build the app
 
-### Build a standalone .app (optional)
+After changing the code, copy `stickynotes/` from the Windows edition into `AwesomeStickyNotes-Mac`, then run:
 
 ```bash
-.venv/bin/python3 -m pip install pyinstaller
-.venv/bin/pyinstaller --windowed --name "Awesome Sticky Notes" --osx-bundle-identifier com.dee.awesomestickynotes AwesomeStickyNotes.py
+python build-app.py
 ```
 
-The app is created at `dist/Awesome Sticky Notes.app`. A packaged app keeps its notes in `~/Library/Application Support/AwesomeStickyNotes`, because writing inside an app bundle breaks its signature.
+Any Python 3 works, on Windows or a Mac, with no extra libraries. It assembles the app from `AwesomeStickyNotes.py`, `requirements.txt`, `stickynotes/` and `packaging/` (the launcher script and the icon) and writes `Awesome Sticky Notes.zip`. On a Mac it also leaves `Awesome Sticky Notes.app` next to it.
+
+To run from source on a Mac instead: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`, then `python3 AwesomeStickyNotes.py` (it hands over to `.venv`; notes then live in `StickyNotesDB/` in the folder).
 
 ---
 
 ## Moving notes between Windows and Mac
 
-Both editions use the same database format. Close the app on both computers, then copy `notes.db` from one `StickyNotesDB` folder to the other.
+Both editions use the same database format. Close the app on both computers, then copy `notes.db` between `StickyNotesDB\notes.db` in the Windows app folder and `~/Library/Application Support/AwesomeStickyNotes/notes.db` on the Mac.
 
 ## Code layout
 
@@ -224,10 +221,12 @@ AwesomeStickyNotesDee/                 Windows edition
   setup.bat                            builds .venv from requirements.txt
   requirements.txt                     PySide6
 AwesomeStickyNotes-Mac/                macOS edition
-  AwesomeStickyNotes.py                entry point (hands over to .venv)
-  Start Awesome Sticky Notes.command   Finder launcher
-  setup.command                        builds .venv from requirements.txt
+  AwesomeStickyNotes.py                entry point (the app runs it with its own Python)
   requirements.txt                     PySide6 and PyObjC's Cocoa bridge
+  packaging/launcher.sh                what double-clicking the app runs: sets up Python, then starts
+  packaging/AppIcon.icns               the app icon
+  build-app.py                         builds Awesome Sticky Notes.app, zipped
+  Awesome Sticky Notes.zip             the built app, to copy to a Mac
 
 stickynotes/                           identical in both folders
   app.py         tray / menu-bar icon, note windows, single instance, day roll-over
@@ -253,4 +252,4 @@ stickynotes/                           identical in both folders
   macutil.py     macOS: desktop window level, menu-bar-only mode, Open at login
 ```
 
-All platform differences live in `system.py`, `winutil.py` and `macutil.py`. When you change `stickynotes/` in one edition, copy it to the other so the two stay identical.
+All platform differences live in `system.py`, `winutil.py` and `macutil.py`. When you change `stickynotes/` in one edition, copy it to the other so the two stay identical, then run `build-app.py` in the Mac folder.
