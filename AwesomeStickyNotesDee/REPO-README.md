@@ -10,10 +10,10 @@ Developed by Deepankar Kotnala.
 
 - **Daily to-do notes.** Unfinished tasks from earlier days stay on the note under **Carried over**, with a "Since Tue" badge. Tasks you finish today are either struck through until midnight or hidden straight away, as you choose in Settings. Older finished tasks leave the note but stay in **Completed history**.
 - **Checklists.** A plain list. Checked items stay struck through until you choose **Clear completed**.
-- **Reminders typed into the task.** End a task with `@5pm`, `@17:30`, `@tomorrow 9am`, `@fri 10am`, `@tonight`, `@30m` or `@2h`, or use the bell on a task. When a reminder is due, a card slides in at the bottom-right with **Mark done** and **Snooze**. Reminders that came due while the app was closed show up the next time it starts.
+- **Reminders typed into the task.** End a task with `@5pm`, `@17:30`, `@tomorrow 9am`, `@fri 10am`, `@tonight`, `@30m` or `@2h`, or use the bell on a task. Reminders can repeat: every few minutes or hours, daily, on weekdays, weekly, monthly, or a custom gap (bell → **Repeat**). When a reminder is due, a card slides in at the bottom-right with **Mark done** and **Snooze** pills for 10, 20 or 30 minutes, an hour, or a custom time. Reminders that came due while the app was closed show up the next time it starts.
 - **Pinned tasks and drag-to-reorder.** Pinned tasks stay in a **Pinned** section at the top of the note. You can drag tasks up and down within their section.
 - **Recycle Bin.** Deleting a note, or a task with its **×** button, moves it to the bin instead of erasing it. Restoring a note brings it back with all its tasks, and restoring a task puts it back where it was. **Delete forever** and **Empty bin** can't be undone.
-- **A look for each note.** Each note has its own colour (with a saturation slider from a faint tint to the full colour), font and text size. Each note can also sit on the desktop or stay on top of other windows.
+- **A look for each note.** Each note has its own colour: 15 ready-made pastels and darks, or any colour from a picker or a `#RRGGBB` code, with a saturation slider from a faint tint to the full colour. Each also has its own card style (flat, elevated with a soft shadow, or glossy 3D), font and text size, a paper look, lined, grid, dotted or gradient paper, a header band and emoji, 21 bundled fonts, and heart or square checkboxes. A note's look can be copied to others like Format Painter, applied to several notes at once, or to every note. Each note can also sit on the desktop or stay on top of other windows.
 - **Your notes stay on your computer.** They are kept in a local SQLite database next to the app, with a backup made every time it starts.
 
 ## Repository layout
@@ -59,8 +59,17 @@ If the app doesn't start, the error appears in a dialog and is saved to `startup
 |---|---|
 | New note in another colour | Hover over a note, click **+** in its header, then click a colour |
 | Colour strength | **⋯** → Colour → **Saturation** slider (double-click it to reset) |
+| Any colour | **⋯** → Colour → the rainbow dot at the end of the colours. Pick by eye, type a code such as `#FFD1DC` (or `#FD1` for short), or reuse a recent colour. The note shows it while you pick |
+| Card style | **⋯** → Style: **Flat** (a plain card), **Elevated** (flat, lifted by a soft shadow) or **3D** (glossy with a deeper shadow). **Settings → Appearance** sets the style for new notes and can apply it to every note |
+| Corners | **Settings → Appearance → Corners**: Square, Soft, Round or Extra round, for every note |
+| Same look on every note | **⋯** → **Apply to all notes** → this colour, this style, these fonts & size, or the whole look |
+| Customise everything | **⋯** → **Customise look…**: colour, card style, paper (lined, grid, dotted or a two-colour gradient), header (plain, tinted or solid), an emoji before the title, title font, text font, size, text colour, line spacing, checkbox shape (circle, square or heart) and how done tasks look (struck through or faded). Changes show on the note straight away |
+| Paper look | **⋯** → Style → **Paper**: paper grain, nearly square corners and lifted ends, in any colour |
+| Copy a look to other notes | **⋯** → **Copy style**, then click **Paste style** on each note you want to look the same. **Done copying** or Esc stops. Like Format Painter in Word |
+| Restyle several notes | Hub → Notes: hover a note and tick its circle, tick more, then **Customise…** or **Paste style** for all of them |
 | Add a task | Type in **Add a task** at the bottom of a note and press Enter |
 | Add a reminder | End the task with `@5pm`, `@tomorrow 9am`, `@30m` and so on, or use the bell on a task |
+| Repeat a reminder | Bell on a task → **Repeat**: every 10, 15 or 30 minutes, every 1, 2 or 3 hours, daily, weekdays, weekly, monthly, or **Custom…** |
 | Complete a task | Click its circle |
 | Edit a task | Double-click it. Clearing the text deletes the task (it goes to the Recycle Bin) |
 | Pin a task to the top | Hover over it and click the **pin**. Click the pin again to unpin |
@@ -69,7 +78,7 @@ If the app doesn't start, the error appears in a dialog and is saved to `startup
 | Resize a note | Drag any edge or corner |
 | Rename a note | Click its title |
 | Text size | **⋯** → Text → Size, or Ctrl + mouse wheel over the tasks, or Ctrl + = / Ctrl + − (Ctrl + 0 resets) |
-| Font | **⋯** → Text → Font. **Use this font & size on all notes** copies it to every note |
+| Font | **⋯** → Text → Font, or **Customise look…** for a separate title font. 21 fonts come with the app: clean (Inter, Roboto, Open Sans, Poppins, Montserrat, Lato, Nunito, DM Sans), handwritten (Caveat, Shantell Sans, Kalam, Patrick Hand, Indie Flower, Shadows Into Light, Gochi Hand, Architects Daughter, Permanent Marker), classic (Merriweather, Lora, Playfair Display) and code (JetBrains Mono) |
 | Colour, type, position, completed style | The **⋯** button in the note header (shown on hover) |
 | Collapse a note | The chevron in the header |
 | Hide a note | The **×** button. Click the tray icon to show it again |
@@ -148,8 +157,17 @@ The app always runs from `.venv`, so installing or upgrading other Pythons or li
 |---|---|
 | New note in another colour | Hover over a note, click **+** in its header, then click a colour |
 | Colour strength | **⋯** → Colour → **Saturation** slider (double-click it to reset) |
+| Any colour | **⋯** → Colour → the rainbow dot at the end of the colours. Pick by eye, type a code such as `#FFD1DC` (or `#FD1` for short), or reuse a recent colour. The note shows it while you pick |
+| Card style | **⋯** → Style: **Flat** (a plain card), **Elevated** (flat, lifted by a soft shadow) or **3D** (glossy with a deeper shadow). **Settings → Appearance** sets the style for new notes and can apply it to every note |
+| Corners | **Settings → Appearance → Corners**: Square, Soft, Round or Extra round, for every note |
+| Same look on every note | **⋯** → **Apply to all notes** → this colour, this style, these fonts & size, or the whole look |
+| Customise everything | **⋯** → **Customise look…**: colour, card style, paper (lined, grid, dotted or a two-colour gradient), header (plain, tinted or solid), an emoji before the title, title font, text font, size, text colour, line spacing, checkbox shape (circle, square or heart) and how done tasks look (struck through or faded). Changes show on the note straight away |
+| Paper look | **⋯** → Style → **Paper**: paper grain, nearly square corners and lifted ends, in any colour |
+| Copy a look to other notes | **⋯** → **Copy style**, then click **Paste style** on each note you want to look the same. **Done copying** or Esc stops. Like Format Painter in Word |
+| Restyle several notes | Hub → Notes: hover a note and tick its circle, tick more, then **Customise…** or **Paste style** for all of them |
 | Add a task | Type in **Add a task** at the bottom of a note and press Return |
 | Add a reminder | End the task with `@5pm`, `@tomorrow 9am`, `@30m` and so on, or use the bell on a task |
+| Repeat a reminder | Bell on a task → **Repeat**: every 10, 15 or 30 minutes, every 1, 2 or 3 hours, daily, weekdays, weekly, monthly, or **Custom…** |
 | Complete a task | Click its circle |
 | Edit a task | Double-click it. Clearing the text deletes the task (it goes to the Recycle Bin) |
 | Pin a task to the top | Hover over it and click the **pin**. Click the pin again to unpin |
@@ -158,7 +176,7 @@ The app always runs from `.venv`, so installing or upgrading other Pythons or li
 | Resize a note | Drag any edge or corner |
 | Rename a note | Click its title |
 | Text size | **⋯** → Text → Size, or ⌘ + scroll over the tasks, or ⌘ = / ⌘ − (⌘ 0 resets) |
-| Font | **⋯** → Text → Font. Noteworthy and Marker Felt give a handwritten look |
+| Font | **⋯** → Text → Font, or **Customise look…** for a separate title font. 21 fonts come with the app: clean (Inter, Roboto, Open Sans, Poppins, Montserrat, Lato, Nunito, DM Sans), handwritten (Caveat, Shantell Sans, Kalam, Patrick Hand, Indie Flower, Shadows Into Light, Gochi Hand, Architects Daughter, Permanent Marker), classic (Merriweather, Lora, Playfair Display) and code (JetBrains Mono) |
 | Colour, type, position, completed style | The **⋯** button in the note header (shown on hover) |
 | Collapse a note | The chevron in the header |
 | Hide a note | The **×** button. Menu-bar icon → **Show all notes** brings it back |
@@ -219,12 +237,17 @@ stickynotes/                           identical in both folders
   widgets.py     check circle, task row, menus, toggles, pills
   hub.py         notes overview, completed history, reminders, Recycle Bin, settings
   reminders.py   reminder scheduler and pop-up cards
+  repeat.py      repeating reminders: every N minutes/hours, daily, weekly...
   store.py       SQLite data model and schema migrations
   notelog.py     plain-text and Excel log of every task
   timeparse.py   "@5pm"-style reminder parsing
   shadow.py      layered soft drop shadows
   icons.py       vector line icons
-  theme.py       colours and fonts
+  theme.py       colours, card styles and fonts
+  colorpicker.py the custom colour picker
+  decor.py       paints a note's card: fill, paper, header band
+  stylepanel.py  the Customise look window
+  fonts/         bundled Google Fonts and their licences
   system.py      platform layer: picks winutil.py or macutil.py
   winutil.py     Windows: desktop pinning, always-on-top, Start with Windows
   macutil.py     macOS: desktop window level, menu-bar-only mode, Open at login

@@ -19,8 +19,17 @@ For a console with error output, run `.venv\Scripts\python AwesomeStickyNotes.py
 |---|---|
 | New note in another colour | Hover over a note, click **+** in its header, then click a colour |
 | Colour strength | **⋯** → Colour → **Saturation** slider, from a faint tint to the full colour (double-click it to reset) |
+| Any colour | **⋯** → Colour → the rainbow dot at the end of the colours. Pick by eye, type a code such as `#FFD1DC` (or `#FD1` for short), or reuse a recent colour. The note shows it while you pick |
+| Card style | **⋯** → Style: **Flat** (a plain card), **Elevated** (flat, lifted by a soft shadow) or **3D** (glossy with a deeper shadow). **Settings → Appearance** sets the style for new notes and can apply it to every note |
+| Corners | **Settings → Appearance → Corners**: Square, Soft, Round or Extra round, for every note |
+| Same look on every note | **⋯** → **Apply to all notes** → this colour, this style, these fonts & size, or the whole look |
+| Customise everything | **⋯** → **Customise look…**: colour, card style, paper (lined, grid, dotted or a two-colour gradient), header (plain, tinted or solid), an emoji before the title, title font, text font, size, text colour, line spacing, checkbox shape (circle, square or heart) and how done tasks look (struck through or faded). Changes show on the note straight away |
+| Paper look | **⋯** → Style → **Paper**: paper grain, nearly square corners and lifted ends, in any colour |
+| Copy a look to other notes | **⋯** → **Copy style**, then click **Paste style** on each note you want to look the same. **Done copying** or Esc stops. Like Format Painter in Word |
+| Restyle several notes | Hub → Notes: hover a note and tick its circle, tick more, then **Customise…** or **Paste style** for all of them |
 | Add a task | Type in **Add a task** at the bottom of a note and press Enter |
 | Add a reminder | End the task with `@5pm`, `@17:30`, `@tomorrow 9am`, `@fri 10am`, `@tonight`, `@30m`, `@2h`, or use the bell on a task |
+| Repeat a reminder | Bell on a task → **Repeat**: every 10, 15 or 30 minutes, every 1, 2 or 3 hours, daily, weekdays, weekly, monthly, or **Custom…** |
 | Complete a task | Click its circle |
 | Edit a task | Double-click it. Clearing the text deletes the task (it goes to the Recycle Bin) |
 | Pin a task to the top | Hover over it and click the **pin**. Pinned tasks stay in a **Pinned** section at the top of the note, above everything else. Click the pin again to unpin |
@@ -29,7 +38,7 @@ For a console with error output, run `.venv\Scripts\python AwesomeStickyNotes.py
 | Resize a note | Drag any edge or corner |
 | Rename a note | Click its title |
 | Text size | **⋯** → Text → Size, or Ctrl + mouse wheel over the tasks, or Ctrl + = / Ctrl + − (Ctrl + 0 resets) |
-| Font | **⋯** → Text → Font. **Use this font & size on all notes** copies it to every note |
+| Font | **⋯** → Text → Font, or **Customise look…** for a separate title font. 21 fonts come with the app: clean (Inter, Roboto, Open Sans, Poppins, Montserrat, Lato, Nunito, DM Sans), handwritten (Caveat, Shantell Sans, Kalam, Patrick Hand, Indie Flower, Shadows Into Light, Gochi Hand, Architects Daughter, Permanent Marker), classic (Merriweather, Lora, Playfair Display) and code (JetBrains Mono) |
 | Colour, type, position, completed style | The **⋯** button in the note header (shown on hover). The colour row stays open so you can try several |
 | Collapse a note | The chevron in the header |
 | Hide a note | The **×** button. Click the tray icon to show it again |
@@ -54,7 +63,9 @@ Deleting a note, or a task with its **×** button, moves it to the Recycle Bin i
 - **Delete forever** and **Empty bin** can't be undone.
 
 ### Reminders
-When a reminder is due, a card slides in at the bottom-right with **Mark done** and **Snooze**. Reminders that came due while the app was closed show up the next time it starts.
+When a reminder is due, a card slides in at the bottom-right. **Mark done** ticks the task off. The **Snooze** pills under it remind you again in 10, 20 or 30 minutes or an hour, and **Custom…** asks for any number of minutes or hours. Reminders that came due while the app was closed show up the next time it starts.
+- **Repeating reminders**: the bell on a task has a **Repeat** menu: every 10, 15 or 30 minutes, every 1, 2 or 3 hours, every day, every weekday (Mon–Fri), every week or every month. **Custom…** repeats every 1–60 minutes, 1–24 hours, or every so many days or weeks. **Pick date & time…** sets the first reminder and the repeat together. A repeating reminder shows a ↻ chip on its task.
+- Closing a repeating reminder's card with **×** keeps it repeating. **Mark done** ticks the task off and stops the repeat. A snooze doesn't shift the later times: a reminder every 15 minutes stays on the quarter hours.
 
 ## Data
 
@@ -88,12 +99,17 @@ stickynotes/
   widgets.py           check circle, task row, menus, toggles, pills
   hub.py               notes overview, completed history, reminders, Recycle Bin, settings
   reminders.py         reminder scheduler and toast pop-ups
+  repeat.py            repeating reminders: every N minutes/hours, daily, weekly...
   store.py             SQLite data model
   notelog.py           plain-text and Excel log of every task
   timeparse.py         "@5pm"-style reminder parsing
   shadow.py            layered soft drop shadows
   icons.py             vector line icons
-  theme.py             colours and fonts
+  theme.py             colours, card styles and fonts
+  colorpicker.py       the custom colour picker
+  decor.py             paints a note's card: fill, paper, header band
+  stylepanel.py        the Customise look window
+  fonts/               bundled Google Fonts and their licences
   system.py            platform layer (picks winutil or macutil)
   winutil.py           Windows: desktop pinning, always-on-top, autostart
   macutil.py           macOS: desktop window level, menu-bar mode, login item

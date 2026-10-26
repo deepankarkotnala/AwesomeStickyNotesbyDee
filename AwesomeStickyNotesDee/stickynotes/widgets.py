@@ -3,15 +3,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QVariantAnimation,
+from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation,
                             Signal)
-from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen, QTextLayout,
-                           QTextOption)
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QDateTimeEdit, QDialog, QGraphicsOpacityEffect,
-                               QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSizePolicy,
-                               QVBoxLayout, QWidget, QWidgetAction)
+from PySide6.QtGui import (QColor, QConicalGradient, QFont, QFontMetrics, QLinearGradient, QPainter,
+                           QPainterPath, QPen, QTextLayout, QTextOption)
+from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QDateTimeEdit, QDialog,
+                               QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
+                               QSizePolicy, QSpinBox, QVBoxLayout, QWidget, QWidgetAction)
 
-from . import icons, system, theme
+from . import icons, repeat, system, theme
 from .store import Task
 from .theme import Palette
 from .timeparse import friendly
@@ -97,12 +97,36 @@ class IconButton(QAbstractButton):
         icons.paint(p, self.name, QRectF((self.width() - s) / 2, (self.height() - s) / 2, s, s), self.color)
 
 
-class CheckCircle(QAbstractButton):
-    """Round, animated checkbox in the style of Apple Reminders."""
+def heart_path(r: QRectF) -> QPainterPath:
+    x, y, w, h = r.x(), r.y(), r.width(), r.height()
+    p = QPainterPath()
+    p.moveTo(x + w / 2, y + h * 0.95)
+    p.cubicTo(x + w * 0.02, y + h * 0.62, x - w * 0.04, y + h * 0.18, x + w * 0.27, y + h * 0.08)
+    p.cubicTo(x + w * 0.39, y + h * 0.04, x + w * 0.48, y + h * 0.12, x + w / 2, y + h * 0.22)
+    p.cubicTo(x + w * 0.52, y + h * 0.12, x + w * 0.61, y + h * 0.04, x + w * 0.73, y + h * 0.08)
+    p.cubicTo(x + w * 1.04, y + h * 0.18, x + w * 0.98, y + h * 0.62, x + w / 2, y + h * 0.95)
+    p.closeSubpath()
+    return p
 
-    def __init__(self, accent: QColor, ring: QColor, parent=None):
+
+def check_shape(shape: str, r: QRectF) -> QPainterPath:
+    """The outline of a checkbox: "circle", "square" (rounded) or "heart"."""
+    if shape == "heart":
+        return heart_path(r.adjusted(-1.2, -1.2, 1.2, 1.2))
+    path = QPainterPath()
+    if shape == "square":
+        path.addRoundedRect(r, 4.5, 4.5)
+    else:
+        path.addEllipse(r)
+    return path
+
+
+class CheckCircle(QAbstractButton):
+    """Animated checkbox in the style of Apple Reminders: a circle, a rounded square or a heart."""
+
+    def __init__(self, accent: QColor, ring: QColor, parent=None, shape: str = "circle"):
         super().__init__(parent)
-        self.accent, self.ring = QColor(accent), QColor(ring)
+        self.accent, self.ring, self.shape = QColor(accent), QColor(ring), shape
         self.setCheckable(True)
         self.setFixedSize(20, 20)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -135,15 +159,16 @@ class CheckCircle(QAbstractButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(2, 2, 16, 16)
         t = max(0.0, min(self._t, 1.15))
+        mark = r.adjusted(4.4, 3.4, -4.4, -5.0) if self.shape == "heart" else r.adjusted(3.6, 3.8, -3.6, -3.4)
         if t < 1.0:
             ring = self.accent if self._hover else self.ring
             p.setPen(QPen(ring, 1.6))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(r)
+            p.drawPath(check_shape(self.shape, r))
             if self._hover and t < 0.05:  # preview of the check mark
                 c = QColor(self.accent)
                 c.setAlphaF(0.55)
-                icons.paint(p, "check", r.adjusted(3.2, 3.4, -3.2, -3.0), c, 3.0)
+                icons.paint(p, "check", mark.adjusted(-0.4, -0.4, 0.4, 0.4), c, 3.0)
         if t > 0.0:
             scale = 0.55 + 0.45 * t
             fill = QRectF(0, 0, r.width() * scale, r.height() * scale)
@@ -151,8 +176,8 @@ class CheckCircle(QAbstractButton):
             p.setOpacity(min(1.0, t))
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(self.accent)
-            p.drawEllipse(fill)
-            icons.paint(p, "check", r.adjusted(3.6, 3.8, -3.6, -3.4), QColor("#FFFFFF"), 3.2)
+            p.drawPath(check_shape(self.shape, fill))
+            icons.paint(p, "check", mark, QColor("#FFFFFF"), 3.2)
 
 
 class Pill(QAbstractButton):
@@ -182,17 +207,21 @@ class Pill(QAbstractButton):
 
 
 class PillButton(QPushButton):
-    def __init__(self, text: str, accent: str, primary: bool = False, dark: bool = False, parent=None):
+    def __init__(self, text: str, accent: str, primary: bool = False, dark: bool = False, small: bool = False,
+                 parent=None):
         super().__init__(text, parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFont(theme.font(9, QFont.Weight.DemiBold))
+        self.setFont(theme.font(8.4 if small else 9, QFont.Weight.DemiBold))
+        shape = "border-radius: 11px; padding: 0 9px;" if small else "border-radius: 8px; padding: 6px 12px;"
+        if small:
+            self.setFixedHeight(23)   # Qt drops the rounding when the radius is over half the height
         if primary:
             bg, fg, hover = accent, "#FFFFFF", theme.rgba(QColor(accent).darker(112))
         else:
             ink = "#FFFFFF" if dark else "#000000"
             bg, fg, hover = theme.rgba(ink, 0.07), ("#F2F2F5" if dark else "#1C1C1E"), theme.rgba(ink, 0.12)
         self.setStyleSheet(f"""
-            QPushButton {{ background: {bg}; color: {fg}; border: none; border-radius: 8px; padding: 6px 12px; }}
+            QPushButton {{ background: {bg}; color: {fg}; border: none; {shape} }}
             QPushButton:hover {{ background: {hover}; }}
         """)
 
@@ -355,9 +384,10 @@ class RowActions(QWidget):
 class TaskText(QWidget):
     """Word-wrapped task text that can draw an animated strike-through, line by line."""
 
-    def __init__(self, text: str, font: QFont, color: QColor, done_color: QColor, done: bool, parent=None):
+    def __init__(self, text: str, font: QFont, color: QColor, done_color: QColor, done: bool, parent=None,
+                 strike: bool = True):
         super().__init__(parent)
-        self.color, self.done_color = QColor(color), QColor(done_color)
+        self.color, self.done_color, self.strike = QColor(color), QColor(done_color), strike
         self._text = text
         self._font = QFont(font)
         self._strike_pos = QFontMetrics(self._font).strikeOutPos()
@@ -425,7 +455,7 @@ class TaskText(QWidget):
         color = mix(self.color, self.done_color, self._t)
         p.setPen(color)
         layout.draw(p, QPointF(0, 0))
-        if self._t <= 0.001:
+        if self._t <= 0.001 or not self.strike:
             return
         p.setPen(QPen(color, 1.3))
         lines = layout.lineCount()
@@ -452,7 +482,7 @@ class TaskRow(QWidget):
     GUTTER = 12                              # left margin that holds the drag grip
 
     def __init__(self, task: Task, pal: Palette, font: QFont, *, done: bool, since: str | None = None,
-                 parent=None):
+                 checkbox: str = "circle", strike: bool = True, pad: int = 5, parent=None):
         super().__init__(parent)
         self.task, self.pal, self.text_font = task, pal, QFont(font)
         self.done = done
@@ -464,13 +494,13 @@ class TaskRow(QWidget):
         self.setMouseTracking(True)  # show the grab cursor over the grip
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(self.GUTTER, 5, 8, 5)
+        lay.setContentsMargins(self.GUTTER, pad, 8, pad)
         lay.setSpacing(9)
 
         # Centre the check circle on the first line of text, whatever the font size.
         line = QFontMetrics(self.text_font).height()
-        self._grip_y = 5 + max(line, 20) / 2
-        self.check = CheckCircle(QColor(pal.accent), pal.faint, self)
+        self._grip_y = pad + max(line, 20) / 2
+        self.check = CheckCircle(QColor(pal.accent), pal.faint, self, checkbox)
         self.check.set_checked_silently(done)
         self.check.clicked.connect(lambda on: self.toggled.emit(self, self.task, on))
         check_col = QVBoxLayout()
@@ -482,7 +512,7 @@ class TaskRow(QWidget):
         self.col = QVBoxLayout()
         self.col.setContentsMargins(0, max(0, (self.check.height() - line) // 2), 0, 0)
         self.col.setSpacing(4)
-        self.label = TaskText(task.text, self.text_font, pal.text, pal.ink(0.38), done)
+        self.label = TaskText(task.text, self.text_font, pal.text, pal.ink(0.38), done, strike=strike)
         self.col.addWidget(self.label)
 
         meta = []
@@ -492,7 +522,8 @@ class TaskRow(QWidget):
             fg = QColor(theme.DANGER) if overdue else (pal.faint if done else QColor(pal.accent))
             bg = QColor(fg)
             bg.setAlphaF(0.13)
-            chip = Pill(friendly(when), fg, bg, "bell")
+            text = f"{friendly(when)}  ·  {repeat.short(task.repeat)}" if task.repeat else friendly(when)
+            chip = Pill(text, fg, bg, "repeat" if task.repeat else "bell")
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
             chip.setToolTip("Change reminder")
             chip.clicked.connect(lambda: self.remind.emit(self.task, chip))
@@ -710,6 +741,37 @@ class Swatch(QAbstractButton):
         p.drawEllipse(c, r, r)
 
 
+class CustomSwatch(Swatch):
+    """The last dot in the colour rows: a rainbow ring that opens the custom colour picker. While the
+    note has a custom colour, the dot shows it."""
+
+    def __init__(self, current: str, ring: QColor, parent=None):
+        custom = theme.is_custom(current)
+        super().__init__(theme.palette(current if custom else "cloud"), custom, ring, parent)
+        self.custom = custom
+        self.setToolTip(f"Custom colour ({current.upper()})…" if custom else "Custom colour…")
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QRectF(self.rect()).center()
+        if self.selected:
+            p.setPen(QPen(self.ring, 2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(c, 11.5, 11.5)
+        r = 8.5 if not self._hover else 9.5
+        rainbow = QConicalGradient(c, 90)
+        for i in range(7):
+            rainbow.setColorAt(i / 6, QColor.fromHsvF(min(i / 6, 0.9999), 0.75, 1))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(rainbow)
+        p.drawEllipse(c, r, r)
+        p.setBrush(QColor(self.pal.bg) if self.custom else QColor("#FFFFFF"))
+        p.drawEllipse(c, r - 3, r - 3)
+        if not self.custom:
+            icons.paint(p, "plus", QRectF(c.x() - 5, c.y() - 5, 10, 10), "#3A3A3C", 2.6)
+
+
 # ------------------------------------------------------------------ menus
 def make_menu(parent=None, dark: bool = False, title: str = "") -> QMenu:
     menu = QMenu(title, parent)
@@ -738,9 +800,12 @@ def add_action(menu: QMenu, text: str, slot=None, *, checked: bool | None = None
     return act
 
 
-def add_submenu(menu: QMenu, title: str) -> QMenu:
-    sub = make_menu(menu, bool(menu.property("dark")), title)
-    menu.addMenu(sub)
+def add_submenu(menu: QMenu, title: str, icon: str | None = None) -> QMenu:
+    dark = bool(menu.property("dark"))
+    sub = make_menu(menu, dark, title)
+    action = menu.addMenu(sub)
+    if icon:
+        action.setIcon(icons.icon(icon, QColor("#F2F2F5" if dark else "#3A3A3C"), 14))
     return sub
 
 
@@ -763,29 +828,99 @@ def _add_widget(menu: QMenu, widget: QWidget) -> None:
     menu.addAction(action)
 
 
-def add_swatches(menu: QMenu, current: str, on_pick, keep_open: bool = False) -> None:
-    """A row of colour dots. With keep_open the menu stays up so colours can be tried one after another;
-    it closes like any menu when you click outside it."""
+SWATCHES_PER_ROW = 8
+
+
+def add_swatches(menu: QMenu, current: str, on_pick, keep_open: bool = False, on_custom=None) -> None:
+    """Rows of colour dots. With keep_open the menu stays up so colours can be tried one after another;
+    it closes like any menu when you click outside it. With on_custom, a last rainbow dot closes the menu
+    and calls on_custom to pick any colour."""
     holder = QWidget()
-    lay = QHBoxLayout(holder)
-    lay.setContentsMargins(8, 4, 8, 4)
-    lay.setSpacing(2)
+    grid = QVBoxLayout(holder)
+    grid.setContentsMargins(8, 4, 8, 4)
+    grid.setSpacing(2)
     ring = QColor("#F2F2F5" if menu.property("dark") else "#3A3A3C")
     swatches = [Swatch(pal, pal.key == current, ring) for pal in theme.PALETTES.values()]
+    custom = CustomSwatch(current, ring) if on_custom else None
 
     def pick(key: str) -> None:
         if keep_open:
             for sw in swatches:
                 sw.selected = sw.pal.key == key
                 sw.update()
+            if custom:
+                custom.selected = custom.custom and key == current
+                custom.update()
         else:
             menu.close()
         on_pick(key)
 
+    def pick_custom() -> None:
+        menu.close()
+        QTimer.singleShot(0, on_custom)   # once the menu has gone
+
     for sw in swatches:
         sw.clicked.connect(lambda _=False, key=sw.pal.key: pick(key))
-        lay.addWidget(sw)
+    dots: list[QWidget] = list(swatches)
+    if custom:
+        custom.clicked.connect(pick_custom)
+        dots.append(custom)
+    for start in range(0, len(dots), SWATCHES_PER_ROW):
+        row = QHBoxLayout()
+        row.setSpacing(2)
+        for dot in dots[start:start + SWATCHES_PER_ROW]:
+            row.addWidget(dot)
+        row.addStretch(1)
+        grid.addLayout(row)
     _add_widget(menu, holder)
+
+
+class MenuSegments(QWidget):
+    """A row of choices inside a menu, like "Flat | Elevated | 3D", that applies at once and keeps
+    the menu open."""
+
+    def __init__(self, options: list[tuple[str, str, str]], current: str, on_pick, dark: bool):
+        super().__init__()
+        fg = "#F2F2F5" if dark else "#1C1C1E"
+        ink = "#FFFFFF" if dark else "#000000"
+        on = theme.rgba("#FFFFFF", 0.16) if dark else "#FFFFFF"
+        edge = theme.rgba("#FFFFFF", 0.10) if dark else theme.rgba("#000000", 0.10)
+        self.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {fg}; border: 1px solid transparent;
+                           border-radius: 7px; padding: 5px 4px; }}
+            QPushButton:hover:!checked {{ background: {theme.rgba(ink, 0.06)}; }}
+            QPushButton:checked {{ background: {on}; border: 1px solid {edge}; }}
+            QWidget#track {{ background: {theme.rgba(ink, 0.06)}; border-radius: 9px; }}
+        """)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(10, 2, 10, 4)
+        track = QWidget()
+        track.setObjectName("track")
+        track.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        lay = QHBoxLayout(track)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(2)
+        self.buttons: dict[str, QPushButton] = {}
+        for key, label, tip in options:
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setChecked(key == current)
+            b.setToolTip(tip)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFont(theme.font(9, QFont.Weight.Medium))
+            b.clicked.connect(lambda _=False, k=key: self._pick(k, on_pick))
+            lay.addWidget(b, 1)
+            self.buttons[key] = b
+        outer.addWidget(track)
+
+    def _pick(self, key: str, on_pick) -> None:
+        for k, b in self.buttons.items():
+            b.setChecked(k == key)
+        on_pick(key)
+
+
+def add_segments(menu: QMenu, options: list[tuple[str, str, str]], current: str, on_pick) -> None:
+    _add_widget(menu, MenuSegments(options, current, on_pick, bool(menu.property("dark"))))
 
 
 class SaturationSlider(QWidget):
@@ -969,7 +1104,8 @@ def add_font_list(menu: QMenu, current: str, on_pick) -> None:
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(0)
     dark = bool(menu.property("dark"))
-    options = [FontOption(family, label, family == current, dark) for family, label in theme.available_fonts()]
+    options: list[FontOption] = []
+    group = None
 
     def pick(family: str) -> None:
         for opt in options:
@@ -977,8 +1113,19 @@ def add_font_list(menu: QMenu, current: str, on_pick) -> None:
             opt.update()
         on_pick(family)
 
-    for opt in options:
-        opt.clicked.connect(lambda _=False, f=opt.family: pick(f))
+    for family, label, kind in theme.available_fonts(current):
+        if kind and kind != group:
+            group = kind
+            heading = QLabel(kind.upper())
+            f = theme.font(7.6, QFont.Weight.Bold)
+            f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.7)
+            heading.setFont(f)
+            color = QColor("#F2F2F5" if dark else "#1C1C1E")
+            heading.setStyleSheet(f"color: {theme.rgba(color, 0.45)}; background: transparent; padding: 8px 12px 2px 12px;")
+            lay.addWidget(heading)
+        opt = FontOption(family, label, family == current, dark)
+        opt.clicked.connect(lambda _=False, f=family: pick(f))
+        options.append(opt)
         lay.addWidget(opt)
     _add_widget(menu, holder)
 
@@ -996,52 +1143,189 @@ def reminder_presets(ref: datetime | None = None) -> list[tuple[str, datetime]]:
 
 
 # ------------------------------------------------------------------ dialogs
-class DateTimeDialog(QDialog):
-    def __init__(self, initial: datetime, parent=None):
+DIALOG_QSS = f"""
+    QDialog {{ background: #FFFFFF; }}
+    QLabel {{ color: {theme.HUB_TEXT}; }}
+    QDateTimeEdit, QComboBox, QSpinBox {{
+        background: #F2F2F7; border: 1px solid transparent; border-radius: 8px;
+        padding: 7px 10px; color: {theme.HUB_TEXT};
+    }}
+    QDateTimeEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 1px solid {theme.HUB_ACCENT}; }}
+    QDateTimeEdit::drop-down, QComboBox::drop-down {{ border: none; width: 22px; }}
+    QComboBox QAbstractItemView {{
+        background: #FFFFFF; color: {theme.HUB_TEXT}; border: 1px solid rgba(0, 0, 0, 28); outline: none;
+        selection-background-color: {theme.HUB_ACCENT}; selection-color: #FFFFFF; padding: 4px;
+    }}
+    QPushButton#step {{ background: #F2F2F7; color: {theme.HUB_TEXT}; border: none; border-radius: 8px; }}
+    QPushButton#step:hover {{ background: #E5E5EA; }}
+"""
+
+
+def _paint_chevron(widget: QWidget) -> None:
+    """The drop-down arrow, which the dialog style sheet would otherwise hide."""
+    p = QPainter(widget)
+    icons.paint(p, "chevron_down", QRectF(widget.width() - 26, (widget.height() - 14) / 2, 14, 14), "#636366", 2.2)
+
+
+class ComboBox(QComboBox):
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        _paint_chevron(self)
+
+
+class DateTimeEdit(QDateTimeEdit):
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        _paint_chevron(self)
+
+
+class Dialog(QDialog):
+    """A small white dialog that stays above the notes, with Cancel and a main button at the bottom."""
+
+    def __init__(self, title: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Set reminder")
+        self.setWindowTitle(title)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setStyleSheet(f"""
-            QDialog {{ background: #FFFFFF; }}
-            QLabel {{ color: {theme.HUB_TEXT}; }}
-            QDateTimeEdit {{
-                background: #F2F2F7; border: 1px solid transparent; border-radius: 8px;
-                padding: 7px 10px; color: {theme.HUB_TEXT};
-            }}
-            QDateTimeEdit:focus {{ border: 1px solid {theme.HUB_ACCENT}; }}
-            QDateTimeEdit::drop-down {{ border: none; width: 22px; }}
-        """)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 18, 20, 16)
-        lay.setSpacing(12)
-        title = QLabel("Remind me at")
-        title.setFont(theme.font(11.5, QFont.Weight.DemiBold))
-        lay.addWidget(title)
-        self.edit = QDateTimeEdit(initial)
-        self.edit.setCalendarPopup(True)
-        self.edit.setDisplayFormat("ddd d MMM yyyy   h:mm AP")
-        self.edit.setFont(theme.font(10.5))
-        lay.addWidget(self.edit)
+        self.setStyleSheet(DIALOG_QSS)
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(20, 18, 20, 16)
+        self.lay.setSpacing(8)
+        self.setMinimumWidth(340)
+
+    def heading(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setFont(theme.font(11.5, QFont.Weight.DemiBold))
+        self.lay.addWidget(label)
+        return label
+
+    def add_buttons(self, ok_text: str) -> None:
+        self.lay.addSpacing(8)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         cancel = PillButton("Cancel", theme.HUB_ACCENT)
-        ok = PillButton("Set reminder", theme.HUB_ACCENT, primary=True)
+        ok = PillButton(ok_text, theme.HUB_ACCENT, primary=True)
         cancel.clicked.connect(self.reject)
         ok.clicked.connect(self.accept)
         ok.setDefault(True)
         buttons.addWidget(cancel)
         buttons.addWidget(ok)
-        lay.addLayout(buttons)
-        self.setMinimumWidth(320)
-
-    def value(self) -> datetime:
-        return self.edit.dateTime().toPython().replace(second=0, microsecond=0)
+        self.lay.addLayout(buttons)
 
 
-def pick_datetime(parent, initial: datetime) -> datetime | None:
-    dlg = DateTimeDialog(initial, parent)
+class DurationField(QWidget):
+    """A number with − / + buttons (or type it), and its unit: "−  45  +   minutes | hours"."""
+
+    def __init__(self, n: int, unit: str, units: tuple[str, ...], parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.spin = QSpinBox()
+        self.spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.spin.setFont(theme.font(10.5, QFont.Weight.DemiBold))
+        self.spin.setFixedWidth(58)
+        for text, delta in (("−", -1), ("+", 1)):
+            b = QPushButton(text)
+            b.setObjectName("step")
+            b.setFixedSize(30, 32)
+            b.setAutoRepeat(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFont(theme.font(11, QFont.Weight.DemiBold))
+            b.clicked.connect(lambda _=False, d=delta: self.spin.stepBy(d))
+            lay.addWidget(b)
+            if delta < 0:
+                lay.addWidget(self.spin)
+        lay.addSpacing(8)
+        self.unit = Segmented([(u, repeat.UNITS[u][1]) for u in units], unit if unit in units else units[0])
+        self.unit.changed.connect(self._limit)
+        lay.addWidget(self.unit)
+        lay.addStretch(1)
+        self._limit(self.unit.current)
+        self.spin.setValue(n)
+
+    def _limit(self, unit: str) -> None:
+        self.spin.setRange(1, repeat.UNITS[unit][3])
+
+    def value(self) -> tuple[int, str]:
+        return self.spin.value(), self.unit.current
+
+
+class ReminderDialog(Dialog):
+    """When to be reminded, and whether to be reminded again: never, every 15 minutes, daily, or a custom gap."""
+    CUSTOM = "custom"
+
+    def __init__(self, initial: datetime, repeat_code: str = "", custom: bool = False, parent=None):
+        super().__init__("Set reminder", parent)
+        self.when_title = self.heading("Remind me at")
+        self.edit = DateTimeEdit(initial)
+        self.edit.setCalendarPopup(True)
+        self.edit.setDisplayFormat("ddd d MMM yyyy   h:mm AP")
+        self.edit.setFont(theme.font(10.5))
+        self.lay.addWidget(self.edit)
+        self.lay.addSpacing(8)
+        self.heading("Repeat")
+        self.repeat = ComboBox()
+        self.repeat.setFont(theme.font(10.5))
+        self.repeat.addItem("Never", "")
+        for code in repeat.PRESETS:
+            self.repeat.addItem(repeat.describe(code), code)
+        self.repeat.addItem("Custom…", self.CUSTOM)
+        self.repeat.setMaxVisibleItems(self.repeat.count())
+        self.lay.addWidget(self.repeat)
+        n, unit = repeat.parse(repeat_code) or (30, "min")
+        self.custom = DurationField(n, unit, ("min", "h", "d", "w"))
+        self.custom_row = QWidget()
+        row = QHBoxLayout(self.custom_row)
+        row.setContentsMargins(0, 4, 0, 0)
+        row.setSpacing(10)
+        every = QLabel("Every")
+        every.setFont(theme.font(10.5))
+        row.addWidget(every)
+        row.addWidget(self.custom, 1)
+        self.lay.addWidget(self.custom_row)
+        self.add_buttons("Set reminder")
+
+        preset = repeat_code if (repeat_code in repeat.PRESETS or not repeat_code) and not custom else self.CUSTOM
+        self.repeat.setCurrentIndex(max(0, self.repeat.findData(preset)))
+        self.repeat.currentIndexChanged.connect(self._sync)
+        self._sync()
+
+    def _sync(self) -> None:
+        code = self.repeat.currentData()
+        self.custom_row.setVisible(code == self.CUSTOM)
+        self.when_title.setText("First reminder at" if code else "Remind me at")
+        self.adjustSize()
+
+    def value(self) -> tuple[datetime, str]:
+        when = self.edit.dateTime().toPython().replace(second=0, microsecond=0)
+        code = self.repeat.currentData()
+        return when, repeat.code(*self.custom.value()) if code == self.CUSTOM else code
+
+
+def pick_reminder(parent, initial: datetime, repeat_code: str = "", custom: bool = False
+                  ) -> tuple[datetime, str] | None:
+    """Ask when to remind and how to repeat: (first time, repeat code), or None if cancelled."""
+    dlg = ReminderDialog(initial, repeat_code, custom, parent)
     return dlg.value() if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+_last_snooze = (45, "min")   # the custom snooze offered next time
+
+
+def pick_snooze(parent) -> int | None:
+    """Ask how long to snooze for; minutes, or None if cancelled."""
+    global _last_snooze
+    dlg = Dialog("Snooze", parent)
+    dlg.heading("Snooze for")
+    field = DurationField(*_last_snooze, ("min", "h"))
+    dlg.lay.addWidget(field)
+    dlg.add_buttons("Snooze")
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    _last_snooze = n, unit = field.value()
+    return n * 60 if unit == "h" else n
 
 
 # ------------------------------------------------------------------ hub controls

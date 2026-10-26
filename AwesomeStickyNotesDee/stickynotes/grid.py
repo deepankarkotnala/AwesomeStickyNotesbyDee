@@ -114,8 +114,11 @@ def _best_spot(grid: Grid, span: Span, covered: Callable[[Span], int]) -> tuple[
 def _give_way(span: Span, before: Span, covered: Callable[[Span], int], min_cols: int,
               min_rows: int) -> Span | None:
     """After a resize: pull the dragged edges back towards where they started until the card is clear.
-    The biggest card that fits wins; among equals, the one closest to what the user dragged."""
+    The biggest card that fits wins; among equals, the one closest to what the user dragged. A card that
+    is already clear (always the case when it was made smaller) keeps the size it was dragged to."""
     col, row, cols, rows = span
+    if cols >= min_cols and rows >= min_rows and not covered(span):
+        return span
     b_col, b_row, b_cols, b_rows = before
     lefts, rights = _between(col, b_col), _between(col + cols, b_col + b_cols)
     tops, bottoms = _between(row, b_row), _between(row + rows, b_row + b_rows)

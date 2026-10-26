@@ -5,18 +5,19 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QEvent, QMargins, QMarginsF, QPoint, QPointF,
                             QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer)
-from PySide6.QtGui import (QColor, QFont, QGuiApplication, QKeySequence, QLinearGradient, QPainter,
-                           QPainterPath, QPalette, QPen, QPixmap, QRegion, QShortcut)
+from PySide6.QtGui import (QColor, QFont, QFontMetrics, QGuiApplication, QKeySequence, QPainter, QPainterPath,
+                           QPalette, QPixmap, QRegion, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLayout,
                                QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
-from . import grid, icons, screens, shadow, system, theme
-from .store import DEFAULT_FONT_SIZE, Note, Task, to_iso
+from . import decor, grid, icons, repeat, screens, shadow, system, theme
+from .store import DEFAULT_FONT_SIZE, Note, Task
 from .timeparse import day_label, extract_reminder, friendly
+from .colorpicker import pick_color
 from .widgets import (IconButton, InlineEdit, ProgressLine, ResizeEdge, ResizeGrip, TaskRow, add_action, add_font_list,
-                      add_menu_label, add_saturation, add_stepper,
-                      add_submenu, add_swatches, animate, animation, make_menu, pick_datetime, EXIT_MS, MOTION,
+                      add_menu_label, add_saturation, add_segments, add_stepper,
+                      add_submenu, add_swatches, animate, animation, make_menu, pick_reminder, EXIT_MS, MOTION,
                       reminder_presets)
 
 MARGINS = QMargins(22, 16, 22, 30)      # transparent room around the card for the shadow
@@ -24,7 +25,10 @@ CARD_PADDING = QMargins(8, 0, 12, 12)        # task rows add their own 12px grip
 HANDLE_BAND = 14                             # strip above the title holding the move handle (part of the header)
 EDGE_OUT, EDGE_IN, EDGE_CORNER = 6, 4, 12    # resize zones: px outside / inside the card, corner reach
 SHADOW_ONLY = MARGINS - QMargins(EDGE_OUT, EDGE_OUT, EDGE_OUT, EDGE_OUT)   # clicks here fall through
-RADIUS = 16.0
+SHADOWS = {"3d": (shadow.REST, shadow.HOVER), "soft": (shadow.SOFT_REST, shadow.SOFT_HOVER),
+           "paper": (shadow.SOFT_REST, shadow.SOFT_HOVER)}   # flat: none
+PAPER_RADIUS = 3.0                           # real sticky notes have nearly square corners
+LIST_SPACING = {"compact": 0, "normal": 1, "roomy": 3}
 MIN_SIZE = QSize(280, 250)
 GLIDE_MS = 220                               # sliding onto the grid after a move or resize
 QWIDGETSIZE_MAX = 16777215
@@ -84,7 +88,7 @@ class Header(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(self.win.pal.ink(0.30 + 0.20 * self.win._hover_t))
+        p.setBrush(self.win.head_pal.ink(0.30 + 0.20 * self.win._hover_t))
         cx = self.win.card.width() / 2 - self.x()
         for dx in (-5.5, 0.0, 5.5):
             for dy in (-2.75, 2.75):
@@ -152,6 +156,54 @@ class EmptyState(QWidget):
         p.setBrush(bg)
         p.drawEllipse(centre, 22, 22)
         icons.paint(p, "check", QRectF(centre.x() - 11, centre.y() - 11, 22, 22), self.pal.accent, 2.4)
+
+
+class PaintBadge(QPushButton):
+    """While a style is being copied: "Paste style" on every other note, "Done" on the one it came from."""
+
+    def __init__(self, win: "NoteWindow"):
+        super().__init__(win.card)
+        self.win = win
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFont(theme.font(9.5, QFont.Weight.DemiBold))
+        self.setIconSize(QSize(15, 15))
+        self.setFixedHeight(32)   # Qt drops the rounding if the radius is over half the height
+        self.setStyleSheet("""
+            QPushButton { background: rgba(28, 28, 30, 225); color: #FFFFFF; border: none;
+                          border-radius: 16px; padding: 0 16px 0 12px; }
+            QPushButton:hover { background: rgba(28, 28, 30, 250); }
+        """)
+        self.clicked.connect(self._click)
+        self.mode: str | None = None
+        self.hide()
+
+    def show_as(self, mode: str | None) -> None:
+        self.mode = mode
+        if mode is None:
+            self.hide()
+            return
+        self._label("Done copying" if mode == "source" else "Paste style",
+                    "check" if mode == "source" else "brush")
+        self.show()
+        self.raise_()
+
+    def _label(self, text: str, icon: str) -> None:
+        self.setText(f"  {text}")
+        self.setIcon(icons.icon(icon, "#FFFFFF", 15, 2.2))
+        self.adjustSize()
+        self.place()
+
+    def place(self) -> None:
+        card = self.win.card
+        self.move((card.width() - self.width()) // 2, round(card.height() * 0.42))
+
+    def _click(self) -> None:
+        if self.mode == "source":
+            self.win.ctl.stop_painting()
+        else:
+            self.win.ctl.paste_style([self.win.note])
+            self._label("Style pasted", "check")
+            QTimer.singleShot(1400, self, lambda: self.mode == "target" and self._label("Paste style", "brush"))
 
 
 class DragGhost(QWidget):
@@ -316,7 +368,7 @@ class NoteWindow(QWidget):
         super().__init__(None, system.window_flags("note"))
         system.prepare(self)
         self.ctl, self.store, self.note = controller, controller.store, note
-        self.pal = theme.palette(note.color, note.saturation)
+        self.pal = self.head_pal = theme.note_palette(note)   # head_pal: colours for the title area
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle(note.title)
         self.setMinimumSize(MIN_SIZE)
@@ -344,7 +396,7 @@ class NoteWindow(QWidget):
         self._title_edit: InlineEdit | None = None
         self._drag: RowDrag | None = None
         self._scroll_to: str | None = None
-        self._themed = None                      # (colour, saturation) the widgets were styled for
+        self._themed = None                      # the look (colour, header...) the widgets were styled for
 
         self._build()
         self.apply_theme()
@@ -461,10 +513,24 @@ class NoteWindow(QWidget):
         QShortcut(QKeySequence("Ctrl+0"), self,
                   lambda: self.step_font_size(DEFAULT_FONT_SIZE - self.note.font_size))
 
+        # Copying a style to other notes (see Controller.copy_style): a badge to click, Esc to stop.
+        self.paint_badge = PaintBadge(self)
+        self._stop_painting = QShortcut(QKeySequence("Esc"), self, self.ctl.stop_painting)
+        self._stop_painting.setEnabled(False)
+
     # ------------------------------------------------------------------ theme
-    def apply_theme(self) -> None:
-        pal = self.pal = theme.palette(self.note.color, self.note.saturation)
-        self._themed = (self.note.color, self.note.saturation)
+    def _look(self) -> tuple:
+        n = self.note
+        return n.color, n.saturation, n.text_color, n.header, n.title_font
+
+    def apply_theme(self, preview: theme.Palette | None = None) -> None:
+        """Style the note for its colour, or for `preview` while a colour is being tried out."""
+        pal = self.pal = preview or theme.note_palette(self.note)
+        head = self.head_pal = theme.header_palette(pal, self.note.header)
+        self._themed = None if preview else self._look()
+        title_font = theme.title_font(self.note.title_font)
+        self.title_lbl.setFont(title_font)
+        self.title_lbl.setFixedHeight(max(26, QFontMetrics(title_font).height() + 2))
         rgba = theme.rgba
         focus_bg = pal.wash(0.10) if pal.dark else QColor(255, 255, 255, 190)
         self.setStyleSheet(f"""
@@ -495,12 +561,14 @@ class NoteWindow(QWidget):
         placeholder.setColor(QPalette.ColorRole.PlaceholderText, pal.ink(0.42))
         self.input.setPalette(placeholder)
         self.input_icon.setIcon(icons.icon("plus", pal.ink(0.45)))
-        self.title_lbl.color = pal.text
-        self.sub_lbl.color = pal.sub
+        self.title_lbl.color = head.text
+        self.title_lbl.update()
+        self.sub_lbl.color = head.sub
         self.sub_lbl.update()
         self.hint.setStyleSheet(f"color: {pal.accent};")
         for b in self.header_buttons:
-            b.set_colors(pal.ink(0.55), pal.wash(0.07))
+            b.set_colors(head.ink(0.62), head.wash(0.09))
+        self.header.update()
         self.progress.set_colors(pal.wash(0.07), QColor(pal.accent))
         self.grip.color = pal.ink(0.22)
         self.update()
@@ -529,8 +597,9 @@ class NoteWindow(QWidget):
             carried, fresh = [], unpinned
         done.sort(key=lambda t: t.done_at or "")
 
-        self.title_lbl.setText(note.title)
+        self.title_lbl.setText(f"{note.emoji}  {note.title}" if note.emoji else note.title)
         self.title_lbl.update()
+        self.list_lay.setSpacing(LIST_SPACING.get(note.spacing, 1))
         self.setWindowTitle(note.title)
         total = len(pending) + len(done)
         counts = f"{len(done)} of {total} done" if total else ""
@@ -616,7 +685,9 @@ class NoteWindow(QWidget):
         return f"Since {day_label(created, today)}"
 
     def _row(self, task: Task, since: str | None) -> TaskRow:
-        row = TaskRow(task, self.pal, self._task_font, done=self._optimistic.get(task.id, task.done), since=since)
+        n = self.note
+        row = TaskRow(task, self.pal, self._task_font, done=self._optimistic.get(task.id, task.done), since=since,
+                      checkbox=n.checkbox, strike=n.done_look != "fade", pad=theme.ROW_PADDING.get(n.spacing, 5))
         row.toggled.connect(self._on_toggle)
         row.edited.connect(self._on_edit)
         row.deleted.connect(lambda t, r=row: self._remove_task(r, t))
@@ -704,7 +775,8 @@ class NoteWindow(QWidget):
         if not body:
             self.store.delete_task(task)
         elif when:
-            self.store.update_task(task, text=body, remind_at=to_iso(when), reminded=False)
+            task.text = body                  # saved together with the new reminder time
+            self.store.set_reminder(task, when)
         else:
             self.store.update_task(task, text=body)
 
@@ -714,19 +786,57 @@ class NoteWindow(QWidget):
             QTimer.singleShot(0, self, self.rebuild)
 
     def _set_reminder(self, task: Task, when: datetime | None) -> None:
-        self.store.update_task(task, remind_at=to_iso(when), reminded=False)
+        self.store.set_reminder(task, when)   # a repeating reminder keeps repeating, from the new time
 
-    def _pick_reminder(self, task: Task) -> None:
-        start = task.remind_dt or (datetime.now() + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-        when = pick_datetime(self, start)
-        if when:
-            self._set_reminder(task, when)
+    @staticmethod
+    def _next_morning(now: datetime) -> datetime:
+        nine = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        return nine if nine > now else nine + timedelta(days=1)
+
+    def _pick_reminder(self, task: Task, repeat_code: str | None = None, custom: bool = False,
+                       start: datetime | None = None) -> None:
+        """The date-and-time dialog, which also sets how the reminder repeats."""
+        now = datetime.now()
+        code = task.repeat if repeat_code is None else repeat_code
+        start = start or task.next_reminder(now) or task.remind_dt
+        if start is None or start < now:
+            start = self._next_morning(now) if repeat.by_the_day(code) else \
+                (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        picked = pick_reminder(self, start, code, custom)
+        if picked:
+            self.store.set_reminder(task, *picked)
+
+    def _set_repeat(self, task: Task, code: str) -> None:
+        """From the Repeat menu. Repeats by the minute or hour start straight away; daily, weekly and the like
+        ask for the time of day, unless the task already has a reminder time to go by."""
+        now = datetime.now()
+        if not code:
+            if task.repeat:   # keep the next reminder, just once
+                self.store.set_reminder(task, task.next_reminder(now) or task.remind_dt, "")
+            return
+        current = task.repeat_from_dt if task.repeat else task.remind_dt
+        if repeat.by_the_day(code) and (current is None or (task.repeat and not repeat.by_the_day(task.repeat))):
+            self._pick_reminder(task, code, start=self._next_morning(now))
+        elif current is not None:
+            self.store.set_reminder(task, current, code)
+        else:
+            self.store.set_reminder(task, now.replace(second=0, microsecond=0) + repeat.step(code), code)
 
     def _reminder_menu(self, task: Task, anchor: QWidget) -> None:
         menu = make_menu(self, self.pal.dark)
         for label, when in reminder_presets():
             add_action(menu, label, lambda _=False, w=when: self._set_reminder(task, w), icon="clock")
         add_action(menu, "Pick date && time…", lambda: self._pick_reminder(task), icon="bell")
+        repeats = add_submenu(menu, f"Repeat  ·  {repeat.short(task.repeat)}" if task.repeat else "Repeat",
+                              icon="repeat")
+        add_action(repeats, "Never", lambda: self._set_repeat(task, ""), checked=not task.repeat)
+        for code in repeat.PRESETS:
+            add_action(repeats, repeat.describe(code), lambda _=False, c=code: self._set_repeat(task, c),
+                       checked=task.repeat == code)
+        repeats.addSeparator()
+        custom = bool(task.repeat) and task.repeat not in repeat.PRESETS
+        add_action(repeats, f"Custom: {repeat.describe(task.repeat)}…" if custom else "Custom…",
+                   lambda: self._pick_reminder(task, custom=True), checked=custom)
         if task.remind_at:
             menu.addSeparator()
             add_action(menu, "Remove reminder", lambda: self._set_reminder(task, None), icon="x", danger=True)
@@ -736,7 +846,8 @@ class NoteWindow(QWidget):
     def _new_menu(self) -> None:
         menu = make_menu(self, self.pal.dark)
         add_menu_label(menu, "New note in colour")
-        add_swatches(menu, "", lambda key: self.ctl.new_note("daily", near=self, color=key))
+        add_swatches(menu, "", lambda key: self.ctl.new_note("daily", near=self, color=key),
+                     on_custom=self._new_note_in_custom_color)
         menu.addSeparator()
         add_action(menu, "New daily note", lambda: self.ctl.new_note("daily", near=self), icon="plus")
         add_action(menu, "New checklist", lambda: self.ctl.new_note("checklist", near=self), icon="note")
@@ -747,16 +858,28 @@ class NoteWindow(QWidget):
         menu = make_menu(self, self.pal.dark)
         add_menu_label(menu, "Colour")
         add_swatches(menu, n.color, lambda key: (store.update_note(n, color=key), slider.set_key(key)),
-                     keep_open=True)
+                     keep_open=True, on_custom=self._custom_color)
         slider = add_saturation(menu, n.color, n.saturation, self._preview_saturation,
                                 lambda v: store.update_note(n, saturation=v))
+        add_menu_label(menu, "Style")
+        add_segments(menu, theme.STYLES, n.style, lambda key: store.update_note(n, style=key))
         add_menu_label(menu, "Text")
         add_stepper(menu, "Size", self._size_label(), self.step_font_size)
         fonts = add_submenu(menu, "Font")
         add_font_list(fonts, n.font_family, lambda family: store.update_note(n, font_family=family))
-        fonts.addSeparator()
-        add_action(fonts, "Use this font && size on all notes",
-                   lambda: self.ctl.apply_font_all(n.font_family, n.font_size), icon="blank")
+        menu.addSeparator()
+        add_action(menu, "Customise look…", lambda: self.ctl.customise([n]), icon="brush")
+        add_action(menu, "Copy style", lambda: self.ctl.copy_style(n), icon="copy")
+        add_action(menu, "Paste style", lambda: self.ctl.paste_style([n]), icon="paste",
+                   enabled=self.ctl.copied_style is not None)
+        everyone = add_submenu(menu, "Apply to all notes")
+        add_action(everyone, "This colour", lambda: self.ctl.apply_to_all(n, ("colour",)), icon="blank")
+        add_action(everyone, "This style (card, paper, header, checkboxes)",
+                   lambda: self.ctl.apply_to_all(n, ("style",)), icon="blank")
+        add_action(everyone, "These fonts && size", lambda: self.ctl.apply_to_all(n, ("font",)), icon="blank")
+        everyone.addSeparator()
+        add_action(everyone, "The whole look", lambda: self.ctl.apply_to_all(n, ("colour", "style", "font")),
+                   icon="check")
         menu.addSeparator()
         add_action(menu, "New daily note", lambda: self.ctl.new_note("daily", near=self), icon="plus")
         add_action(menu, "New checklist", lambda: self.ctl.new_note("checklist", near=self), icon="note")
@@ -782,10 +905,26 @@ class NoteWindow(QWidget):
         add_action(menu, "Delete note…", self._delete, icon="trash", danger=True)
         menu.exec(self.btn_more.mapToGlobal(QPoint(0, self.btn_more.height() + 4)))
 
+    def _custom_color(self) -> None:
+        """Any colour, shown on the note while it is being picked."""
+        picked = pick_color(self, QColor(self.pal.bg), self.ctl.recent_colors(),
+                            lambda code: self.apply_theme(theme.palette(code)))
+        if picked:
+            self.store.update_note(self.note, color=picked, saturation=0.5)   # exactly the colour picked
+            self.ctl.remember_color(picked)
+        else:
+            self.apply_theme()
+
+    def _new_note_in_custom_color(self) -> None:
+        picked = pick_color(self, QColor(self.pal.bg), self.ctl.recent_colors())
+        if picked:
+            self.ctl.remember_color(picked)
+            self.ctl.new_note("daily", near=self, color=picked)
+
     def _preview_saturation(self, value: float) -> None:
         """While the slider is dragged only the card background changes - a cheap repaint, no rebuild."""
         self.note.saturation = value          # saved when the slider is released
-        self.pal = theme.palette(self.note.color, value)
+        self.pal = theme.note_palette(self.note)
         self.update()
 
     def _size_label(self) -> str:
@@ -860,6 +999,7 @@ class NoteWindow(QWidget):
         ed = InlineEdit(self.note.title, self.header)
         ed.setObjectName("titleEdit")
         ed.setFont(self.title_lbl.font())
+        ed.setStyleSheet(f"color: {theme.rgba(self.head_pal.text)};")
         ed.setFixedHeight(self.title_lbl.height())
         self.set_title_hover(False)
         ed.committed.connect(self._finish_rename)
@@ -982,6 +1122,11 @@ class NoteWindow(QWidget):
             self.setMaximumHeight(QWIDGETSIZE_MAX)
             self.setMinimumHeight(MIN_SIZE.height())
 
+    def set_painter(self, mode: str | None) -> None:
+        """Copying a style: "source" on the note it came from, "target" on the others, None when done."""
+        self.paint_badge.show_as(mode)
+        self._stop_painting.setEnabled(mode is not None)
+
     def focus_input(self) -> None:
         self.raise_()
         self.activateWindow()
@@ -993,9 +1138,10 @@ class NoteWindow(QWidget):
     def _on_note_changed(self, note_id: str) -> None:
         if note_id != self.note.id or self._quiet:
             return
-        if (self.note.color, self.note.saturation) != self._themed:
+        if self._look() != self._themed:
             self.apply_theme()
         self.rebuild()
+        self.update()   # the card style may have changed
 
     # ------------------------------------------------------------------ geometry
     def _restore_geometry(self) -> None:
@@ -1099,10 +1245,21 @@ class NoteWindow(QWidget):
     def moveEvent(self, e):
         self._geo_timer.start()
 
-    def resizeEvent(self, e):
+    def _place_grip(self) -> None:
         cw = self.width() - MARGINS.left() - MARGINS.right()
         ch = self.height() - MARGINS.top() - MARGINS.bottom()
-        self.grip.move(cw - self.grip.width() - 3, ch - self.grip.height() - 3)
+        inset = 3 + max(0, round((self.radius() - 16) / 2))   # keep it inside rounder corners
+        self.grip.move(cw - self.grip.width() - inset, ch - self.grip.height() - inset)
+
+    def restyle(self) -> None:
+        """The app-wide look (corner roundness) changed."""
+        self._place_grip()
+        self.update()
+
+    def resizeEvent(self, e):
+        self._place_grip()
+        if self.paint_badge.isVisible():
+            self.paint_badge.place()
         self._place_resizers()
         self._geo_timer.start()
 
@@ -1137,10 +1294,19 @@ class NoteWindow(QWidget):
         self.title_lbl.reserve = 0
         self.title_lbl.update()
 
+    def radius(self) -> float:
+        if self.note.style == "paper":
+            return min(PAPER_RADIUS, float(self.store.settings.radius))
+        return float(self.store.settings.radius)
+
     def _paint_shadow(self, p: QPainter) -> None:
-        dpr, card = self.devicePixelRatioF(), self.card_rect()
-        weights = ((shadow.REST, 1.0 - self._hover_t), (shadow.HOVER, self._hover_t))
-        patches = [(shadow.nine_patch(MARGINS, RADIUS, layers, dpr), w) for layers, w in weights]
+        layers = SHADOWS.get(self.note.style)
+        if layers is None:
+            return
+        rest, hover = layers
+        dpr, card, radius = self.devicePixelRatioF(), self.card_rect(), self.radius()
+        weights = ((rest, 1.0 - self._hover_t), (hover, self._hover_t))
+        patches = [(shadow.nine_patch(MARGINS, radius, layers, dpr), w) for layers, w in weights]
         if self._collapsing() or all(patch.fits(card.size()) for patch, _ in patches):
             # Stretchable shadow: no re-blurring while resizing or animating.
             for patch, weight in patches:
@@ -1149,15 +1315,24 @@ class NoteWindow(QWidget):
                     patch.draw(p, self.width(), self.height())
         else:
             # A collapsed card is too small to stretch from - render it exactly, once per size.
-            key = (self.size().toTuple(), dpr)
+            key = (self.size().toTuple(), dpr, radius, self.note.style)
             if not self._exact_shadow or self._exact_shadow[0] != key:
-                self._exact_shadow = (key, shadow.render(self.size(), card, RADIUS, shadow.REST, dpr),
-                                      shadow.render(self.size(), card, RADIUS, shadow.HOVER, dpr))
+                self._exact_shadow = (key, shadow.render(self.size(), card, radius, rest, dpr),
+                                      shadow.render(self.size(), card, radius, hover, dpr))
             for pixmap, (_, weight) in zip(self._exact_shadow[1:], weights):
                 if weight > 0.001:
                     p.setOpacity(weight)
                     p.drawPixmap(0, 0, pixmap)
         p.setOpacity(1.0)
+        if self.note.style == "paper" and card.height() > 90:   # lifted bottom corners
+            lift = shadow.curl(dpr)
+            y = card.bottom() - 22 + 2 * self._hover_t
+            p.drawPixmap(QPointF(card.left() - 16, y), lift)
+            p.save()
+            p.translate(card.right() + 16, y)
+            p.scale(-1, 1)
+            p.drawPixmap(QPointF(0, 0), lift)
+            p.restore()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -1166,15 +1341,5 @@ class NoteWindow(QWidget):
         self._paint_shadow(p)
 
         r = self.card_rect()
-        path = QPainterPath()
-        path.addRoundedRect(r, RADIUS, RADIUS)
-        p.fillPath(path, QColor(self.pal.bg))
-        if not self.pal.dark:
-            sheen = QLinearGradient(r.topLeft(), QPointF(r.left(), r.top() + 110))
-            sheen.setColorAt(0, QColor(255, 255, 255, 110))
-            sheen.setColorAt(1, QColor(255, 255, 255, 0))
-            p.fillPath(path, sheen)
-        border = QColor(255, 255, 255, 24) if self.pal.dark else QColor(0, 0, 0, 20)
-        p.setPen(QPen(border, 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), RADIUS - 0.5, RADIUS - 0.5)
+        head = min(r.bottom(), MARGINS.top() + self.header.geometry().bottom() + 6)
+        decor.paint_card(p, r, self.note, self.pal, self.radius(), self._hover_t, head)
