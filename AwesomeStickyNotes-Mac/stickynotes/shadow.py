@@ -8,6 +8,9 @@ from PySide6.QtWidgets import QGraphicsBlurEffect, QGraphicsPixmapItem, QGraphic
 # (blur radius, y offset, opacity)
 REST = ((3, 1, 0.10), (26, 10, 0.16))
 HOVER = ((4, 2, 0.12), (36, 16, 0.24))
+# The "elevated" card style: flat, lifted by a soft even shadow, like a material-design card.
+SOFT_REST = ((2, 1, 0.07), (16, 5, 0.09))
+SOFT_HOVER = ((3, 2, 0.08), (24, 9, 0.13))
 
 _FORMAT = QImage.Format.Format_ARGB32_Premultiplied
 
@@ -102,3 +105,29 @@ def render(size: QSize, card: QRectF, radius: float, layers, dpr: float = 1.0) -
     pixmap = QPixmap.fromImage(out)
     pixmap.setDevicePixelRatio(dpr)
     return pixmap
+
+
+_curls: dict = {}
+CURL_SIZE = QSize(150, 44)
+
+
+def curl(dpr: float) -> QPixmap:
+    """The shadow under a paper note's lifted bottom-left corner: deepest at the corner and fading towards
+    the middle. Drawn mirrored for the bottom-right corner."""
+    if dpr not in _curls:
+        w, h = round(CURL_SIZE.width() * dpr), round(CURL_SIZE.height() * dpr)
+        shape = QImage(w, h, _FORMAT)
+        shape.fill(Qt.GlobalColor.transparent)
+        p = QPainter(shape)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.scale(dpr, dpr)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 92))
+        p.translate(22, 20)
+        p.rotate(-3.5)
+        p.drawRoundedRect(QRectF(0, 0, 104, 9), 4.5, 4.5)
+        p.end()
+        pixmap = QPixmap.fromImage(_blur(shape, 8 * dpr))
+        pixmap.setDevicePixelRatio(dpr)
+        _curls[dpr] = pixmap
+    return _curls[dpr]

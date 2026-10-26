@@ -5,12 +5,12 @@ from collections import defaultdict
 from datetime import date, datetime
 
 from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter
-from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel,
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtWidgets import (QAbstractButton, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel,
                                QLayout, QLineEdit, QMessageBox, QScrollArea, QStackedWidget, QVBoxLayout,
                                QWidget)
 
-from . import APP_NAME, APP_SHORT_NAME, DEVELOPER, __version__, icons, system, theme
+from . import APP_NAME, APP_SHORT_NAME, DEVELOPER, __version__, decor, icons, repeat, system, theme
 from .note import ElidedLabel
 from .store import Note, Task, data_dir
 from .timeparse import clock, day_label, friendly
@@ -99,7 +99,7 @@ class Card(QFrame):
 
 
 class Dot(QWidget):
-    """Small status glyph: a filled check, a bell, or a colour dot."""
+    """Small status glyph: a filled check, a bell, a repeat arrow, or a colour dot."""
 
     def __init__(self, kind: str, color: str | QColor, parent=None):
         super().__init__(parent)
@@ -114,15 +114,15 @@ class Dot(QWidget):
             p.setBrush(self.color)
             p.drawEllipse(QRectF(2, 2, 18, 18))
             icons.paint(p, "check", QRectF(5.5, 5.8, 11, 11), "#FFFFFF", 3.2)
-        elif self.kind == "bell":
-            icons.paint(p, "bell", QRectF(2, 2, 18, 18), self.color, 2.0)
+        elif self.kind in ("bell", "repeat"):
+            icons.paint(p, self.kind, QRectF(2, 2, 18, 18), self.color, 2.0)
         else:
             p.setBrush(self.color)
             p.drawEllipse(QRectF(6, 6, 10, 10))
 
 
 def note_pill(note: Note | None) -> Pill:
-    pal = theme.palette(note.color if note else "cloud")
+    pal = theme.palette(note.color if note else "cloud", note.saturation if note else 0.5)
     fg = QColor(pal.accent).darker(115)
     bg = QColor(pal.accent)
     bg.setAlphaF(0.13)
@@ -171,14 +171,45 @@ class Page(QWidget):
 
 
 # ---------------------------------------------------------------- notes
+class SelectDot(QAbstractButton):
+    """The circle in a note tile's corner that selects it, to restyle several notes at once."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(24, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Select, to change the look of several notes at once")
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(2, 2, -2, -2)
+        if self.isChecked():
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(theme.HUB_ACCENT))
+            p.drawEllipse(r)
+            icons.paint(p, "check", r.adjusted(4.5, 4.8, -4.5, -4.2), "#FFFFFF", 3.0)
+        else:
+            p.setPen(QColor(0, 0, 0, 70))
+            p.setBrush(QColor(255, 255, 255, 230))
+            p.drawEllipse(r)
+
+
 class NoteTile(QFrame):
+    TITLE_BOTTOM = 44     # where the title area ends, for the header band
+
     def __init__(self, page: "NotesPage", note: Note):
         super().__init__()
         self.page, self.note = page, note
-        pal = self.pal = theme.palette(note.color, note.saturation)
+        pal = self.pal = theme.note_palette(note)
+        head = theme.header_palette(pal, note.header)
         self.setFixedHeight(200)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         soft_shadow(self, 24, 4, 26)
+        self.select = SelectDot(self)
+        self.select.setChecked(note.id in page.selected)
+        self.select.toggled.connect(lambda on: page.set_selected(note.id, on))
         store = page.store
         tasks = store.tasks_for(note.id)
         pending = [t for t in tasks if not t.done]
@@ -188,11 +219,15 @@ class NoteTile(QFrame):
         lay.setContentsMargins(16, 14, 10, 10)
         lay.setSpacing(3)
         title = ElidedLabel()
-        title.setText(note.title)
-        title.color = pal.text
-        title.setFont(theme.font(12, QFont.Weight.DemiBold, display=True))
+        title.setText(f"{note.emoji}  {note.title}" if note.emoji else note.title)
+        title.color = head.text
+        title_font = theme.title_font(note.title_font)
+        title_font.setPointSizeF(title_font.pointSizeF() * 0.89)
+        title.setFont(title_font)
         title.setFixedHeight(24)
+        title.reserve = 28        # clear of the select circle
         lay.addWidget(title)
+        lay.addSpacing(6 if note.header != "plain" else 0)
         kind = "Daily to-do" if note.kind == "daily" else "Checklist"
         status = f"{kind}  ·  {len(pending)} pending  ·  {len(today_done)} done today"
         if not note.visible:
@@ -222,6 +257,7 @@ class NoteTile(QFrame):
         bar.addWidget(eye)
         bar.addWidget(trash)
         lay.addLayout(bar)
+        self.select.raise_()
 
     @staticmethod
     def _text(text: str, pt: float, color: QColor) -> QLabel:
@@ -235,15 +271,35 @@ class NoteTile(QFrame):
             self.page.store.delete_note(self.note)
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        if self.page.selected:      # while choosing notes, a click selects rather than opens
+            self.select.toggle()
+        else:
             self.page.ctl.focus_note(self.note.id)
+
+    def resizeEvent(self, e):
+        self.select.move(self.width() - self.select.width() - 8, 8)
+
+    def enterEvent(self, e):
+        self.select.show()
+
+    def leaveEvent(self, e):
+        self.select.setVisible(bool(self.page.selected))
+
+    def showEvent(self, e):
+        self.select.setVisible(bool(self.page.selected))
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QColor(0, 0, 0, 18) if not self.pal.dark else QColor(255, 255, 255, 24))
-        p.setBrush(QColor(self.pal.bg))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 14, 14)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        radius = 3.0 if self.note.style == "paper" else 14.0
+        decor.paint_card(p, r, self.note, self.pal, radius, 0.0, r.top() + self.TITLE_BOTTOM, scale=0.85)
+        if self.select.isChecked():          # selected: an accent outline
+            p.setPen(QPen(QColor(theme.HUB_ACCENT), 2.5))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
 
 
 class NotesPage(Page):
@@ -251,17 +307,41 @@ class NotesPage(Page):
 
     def __init__(self, hub):
         super().__init__(hub)
+        self.selected: set[str] = set()      # ids of the notes chosen for restyling
+        self.tiles: list[NoteTile] = []
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
-        top = QHBoxLayout()
+        self.top = QWidget()
+        top = QHBoxLayout(self.top)
+        top.setContentsMargins(0, 0, 0, 0)
         top.addWidget(label("Your notes", 12, QFont.Weight.DemiBold))
+        top.addWidget(label("Hover a note and tick its circle to restyle several at once", 9, color=SUB))
         top.addStretch(1)
         for text, kind in (("+  Daily note", "daily"), ("+  Checklist", "checklist")):
             b = PillButton(text, theme.HUB_ACCENT, primary=kind == "daily")
             b.clicked.connect(lambda _=False, k=kind: self.ctl.new_note(k))
             top.addWidget(b)
-        root.addLayout(top)
+        root.addWidget(self.top)
+
+        self.bar = QWidget()          # shown instead while notes are selected
+        bar = QHBoxLayout(self.bar)
+        bar.setContentsMargins(0, 0, 0, 0)
+        self.count = label("", 12, QFont.Weight.DemiBold)
+        bar.addWidget(self.count)
+        bar.addStretch(1)
+        customise = PillButton("Customise…", theme.HUB_ACCENT, primary=True)
+        customise.clicked.connect(lambda: self.ctl.customise(self._chosen()))
+        self.paste = PillButton("Paste style", theme.HUB_ACCENT)
+        self.paste.clicked.connect(lambda: self.ctl.paste_style(self._chosen()))
+        everything = PillButton("Select all", theme.HUB_ACCENT)
+        everything.clicked.connect(self.select_all)
+        cancel = PillButton("Cancel", theme.HUB_ACCENT)
+        cancel.clicked.connect(self.clear_selection)
+        for b in (customise, self.paste, everything, cancel):
+            bar.addWidget(b)
+        root.addWidget(self.bar)
+        self.bar.hide()
         area, self.lay = scroll_page(self)
         self.grid = QGridLayout()
         self.grid.setContentsMargins(4, 6, 4, 6)
@@ -273,10 +353,38 @@ class NotesPage(Page):
 
     def refresh(self) -> None:
         clear(self.grid)
-        for i, note in enumerate(self.store.notes):
-            self.grid.addWidget(NoteTile(self, note), i // self.COLUMNS, i % self.COLUMNS)
+        self.selected &= {n.id for n in self.store.notes}
+        self.tiles = [NoteTile(self, note) for note in self.store.notes]
+        for i, tile in enumerate(self.tiles):
+            self.grid.addWidget(tile, i // self.COLUMNS, i % self.COLUMNS)
         for c in range(self.COLUMNS):
             self.grid.setColumnStretch(c, 1)
+        self._show_bar()
+
+    def _chosen(self) -> list[Note]:
+        return [n for n in self.store.notes if n.id in self.selected]
+
+    def set_selected(self, note_id: str, on: bool) -> None:
+        (self.selected.add if on else self.selected.discard)(note_id)
+        self._show_bar()
+
+    def select_all(self) -> None:
+        for tile in self.tiles:
+            tile.select.setChecked(True)
+
+    def clear_selection(self) -> None:
+        for tile in self.tiles:
+            tile.select.setChecked(False)
+
+    def _show_bar(self) -> None:
+        n = len(self.selected)
+        self.top.setVisible(not n)
+        self.bar.setVisible(bool(n))
+        self.count.setText(f"{n} note{'s' if n != 1 else ''} selected")
+        self.paste.setEnabled(self.ctl.copied_style is not None)
+        for tile in self.tiles:
+            tile.select.setVisible(bool(n) or tile.underMouse())
+            tile.update()
 
 
 # ---------------------------------------------------------------- completed history
@@ -386,12 +494,13 @@ class RemindersPage(Page):
                 done = IconButton("check", "#636366", 28, 15, "Mark done")
                 done.clicked.connect(lambda _=False, task=t: self.store.set_done(task, True))
                 remove = IconButton("x", "#636366", 28, 15, "Remove reminder")
-                remove.clicked.connect(
-                    lambda _=False, task=t: self.store.update_task(task, remind_at=None, reminded=False))
+                remove.clicked.connect(lambda _=False, task=t: self.store.set_reminder(task, None))
                 color = theme.DANGER if overdue else (theme.palette(note.color).accent if note else theme.HUB_ACCENT)
                 meta = friendly(t.remind_dt) if overdue else clock(t.remind_dt)
-                card.add_row(TaskLine(Dot("bell", color), t.text, note_pill(note), meta, [done, remove],
-                                      QColor(theme.DANGER) if overdue else SUB))
+                if t.repeat:
+                    meta += f"  ·  {repeat.short(t.repeat)}"
+                card.add_row(TaskLine(Dot("repeat" if t.repeat else "bell", color), t.text, note_pill(note), meta,
+                                      [done, remove], QColor(theme.DANGER) if overdue else SUB))
             self.lay.addWidget(card)
         self.lay.addStretch(1)
 
@@ -505,10 +614,28 @@ class SettingsPage(Page):
         general.add_row(self._row("Completed tasks on notes",
                                   "Strike through: kept on the note until the end of the day. "
                                   "Hide: they move straight to Completed.", self.completed))
-        self.snooze = Segmented([(str(m), f"{m} min") for m in (5, 10, 15, 30)], str(s.snooze_minutes))
-        self.snooze.changed.connect(lambda v: self.store.update_settings(snooze_minutes=int(v)))
-        general.add_row(self._row("Snooze length", "How long “Snooze” postpones a reminder.", self.snooze))
         lay.addWidget(general)
+
+        lay.addWidget(section_label("Appearance"))
+        look = Card()
+        self.style = Segmented([(key, name) for key, name, _ in theme.STYLES], s.style)
+        self.style.changed.connect(lambda v: self.store.update_settings(style=v))
+        apply_style = PillButton("Apply to all notes", theme.HUB_ACCENT)
+        apply_style.setToolTip("Give every note this style now")
+        apply_style.clicked.connect(lambda: self.ctl.set_style_all(self.style.current))
+        style_box = QWidget()
+        sl = QHBoxLayout(style_box)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(10)
+        sl.addWidget(self.style)
+        sl.addWidget(apply_style)
+        look.add_row(self._row("Card style for new notes",
+                               "Flat: a plain card. Elevated: flat, lifted by a soft shadow. 3D: glossy with a "
+                               "deeper shadow. Each note can have its own under ⋯ → Style.", style_box))
+        self.radius = Segmented([(str(r), name) for r, name in theme.RADII], str(s.radius))
+        self.radius.changed.connect(lambda v: self.store.update_settings(radius=int(v)))
+        look.add_row(self._row("Corners", "How rounded the corners of every note are.", self.radius))
+        lay.addWidget(look)
 
         lay.addWidget(section_label("Reminder shortcuts"))
         tips = Card()
@@ -578,7 +705,8 @@ class SettingsPage(Page):
         s = self.store.settings
         self.pin.set_current(s.pin)
         self.completed.set_current(s.completed)
-        self.snooze.set_current(str(s.snooze_minutes))
+        self.style.set_current(s.style)
+        self.radius.set_current(str(s.radius))
         self.autostart.blockSignals(True)
         self.autostart.setChecked(system.autostart_enabled())
         self.autostart.blockSignals(False)

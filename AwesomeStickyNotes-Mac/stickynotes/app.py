@@ -5,21 +5,22 @@ import getpass
 import sys
 from datetime import date
 
-from PySide6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
-from . import APP_NAME, SLUG, system, theme
+from . import APP_NAME, SLUG, screens, system, theme
 from .hub import HubWindow
 from .note import MARGINS, NoteWindow
 from .notelog import NotesLog
 from .reminders import ReminderService
-from .store import Note, Store
+from .store import LOOK_GROUPS, Note, Store, look_of
+from .stylepanel import StylePanel
 from .widgets import add_action, make_menu
 
 SERVER_NAME = f"{SLUG}-{getpass.getuser()}"
-NEW_NOTE_COLORS = ("lemon", "mint", "sky", "peach", "lavender", "rose")
+NEW_NOTE_COLORS = ("lemon", "mint", "sky", "peach", "lavender", "rose", "aqua", "apricot", "sage")
 
 
 def app_icon() -> QIcon:
@@ -79,13 +80,19 @@ class Controller(QObject):
         self.log = NotesLog(self.store)
         self.windows: dict[str, NoteWindow] = {}
         self.hub: HubWindow | None = None
+        self.style_panel = None                   # the "Customise look" window, while it is open
+        self.copied_style: dict | None = None     # a note's look, ready to paste onto others
+        self.painting_from: str | None = None     # the note it was copied from, while "Paste style" badges show
         self._today = date.today()
         self._desktop = system.shell_token()
         self._hide_tip_shown = False
+        self.layout_key = screens.current_key()   # the monitor arrangement note positions are saved under
+        self.settling = False                     # monitors are changing: positions aren't the user's doing
 
         self._build_tray()
         self.reminders = ReminderService(self)
         self.store.notes_changed.connect(self.sync_windows)
+        self.store.settings_changed.connect(self._repaint_notes)   # corner roundness
         self.sync_windows()
 
         self._clock = QTimer(self, interval=30_000)        # day roll-over
@@ -94,6 +101,16 @@ class Controller(QObject):
         self._shell = QTimer(self, interval=3_000)         # Explorer restarts
         self._shell.timeout.connect(self._check_shell)
         self._shell.start()
+
+        # Monitor plugged in or out, resolution or scaling changed: wait for Windows to finish moving
+        # windows around, then put every note where it belongs for the new arrangement.
+        self._relayout = QTimer(self, singleShot=True, interval=1500)
+        self._relayout.timeout.connect(self._apply_layout)
+        app.screenAdded.connect(self._watch_screen)
+        app.screenRemoved.connect(self._screens_changed)
+        app.primaryScreenChanged.connect(self._screens_changed)
+        for screen in app.screens():
+            self._watch_screen(screen, changed=False)
 
         if self.store.settings.autostart:
             try:
@@ -141,6 +158,7 @@ class Controller(QObject):
             if note_id not in self.windows:
                 window = self.windows[note_id] = NoteWindow(self, note)
                 window.show()
+                window.set_painter(self._painter_mode(note_id))
 
     def recreate_windows(self) -> None:
         for window in self.windows.values():
@@ -148,6 +166,10 @@ class Controller(QObject):
             window.deleteLater()
         self.windows.clear()
         self.sync_windows()
+
+    def cards(self, exclude: NoteWindow | None = None) -> list[QRect]:
+        """Where the cards of the open notes are (or are sliding to), so a note can keep clear of them."""
+        return [w.card_target() for w in self.windows.values() if w is not exclude and w.isVisible()]
 
     def default_position(self, size: QSize) -> QPoint:
         area = QGuiApplication.primaryScreen().availableGeometry()
@@ -159,7 +181,9 @@ class Controller(QObject):
         props: dict = {"color": color or min(NEW_NOTE_COLORS, key=used.count)}
         if near is not None:
             props.update(font_family=near.note.font_family, font_size=near.note.font_size,
-                         saturation=near.note.saturation)
+                         saturation=near.note.saturation, style=near.note.style)
+        if theme.is_custom(props["color"]):
+            props["saturation"] = 0.5   # exactly the colour picked
             g = near.geometry()
             overlap = MARGINS.left() + MARGINS.right() - 8   # let the shadows overlap
             x = g.x() - g.width() + overlap
@@ -226,9 +250,67 @@ class Controller(QObject):
         for window in self.windows.values():
             window.apply_pin()
 
-    def apply_font_all(self, family: str, size: float) -> None:
+    def restyle(self, notes: list[Note], **changes) -> None:
+        """Change the look of several notes at once."""
+        for note in notes:
+            self.store.update_note(note, **changes)
+
+    def apply_to_all(self, source: Note, groups: tuple[str, ...] = tuple(LOOK_GROUPS)) -> None:
+        """Give every note these parts of `source`'s look ("colour", "style", "font"). Its card style also
+        becomes the one new notes get."""
+        self.restyle([n for n in self.store.notes if n is not source], **look_of(source, groups))
+        if "style" in groups:
+            self.store.update_settings(style=source.style)
+
+    # copy and paste a look, like Format Painter: copying shows "Paste style" on every other note
+    def copy_style(self, note: Note) -> None:
+        self.copied_style = look_of(note)
+        self.painting_from = note.id
+        self._show_painter()
+
+    def paste_style(self, notes: list[Note]) -> None:
+        if self.copied_style:
+            self.restyle(notes, **self.copied_style)
+
+    def stop_painting(self) -> None:
+        self.painting_from = None
+        self._show_painter()
+
+    def _painter_mode(self, note_id: str) -> str | None:
+        if self.painting_from is None:
+            return None
+        return "source" if note_id == self.painting_from else "target"
+
+    def _show_painter(self) -> None:
+        for note_id, window in self.windows.items():
+            window.set_painter(self._painter_mode(note_id))
+
+    def customise(self, notes: list[Note]) -> None:
+        """Open the style panel for one note or several."""
+        if self.style_panel is not None:
+            self.style_panel.close()
+        self.style_panel = panel = StylePanel(self, notes)
+        panel.destroyed.connect(lambda: setattr(self, "style_panel", None) if self.style_panel is panel else None)
+        system.activate_app()
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def set_style_all(self, style: str) -> None:
+        self.store.update_settings(style=style)
         for note in self.store.notes:
-            self.store.update_note(note, font_family=family, font_size=size)
+            self.store.update_note(note, style=style)
+
+    def recent_colors(self) -> list[str]:
+        return [c for c in self.store.settings.recent_colors.split(",") if theme.is_custom(c)]
+
+    def remember_color(self, code: str) -> None:
+        colors = [code] + [c for c in self.recent_colors() if c != code]
+        self.store.update_settings(recent_colors=",".join(colors[:8]))
+
+    def _repaint_notes(self) -> None:
+        for window in self.windows.values():
+            window.restyle()
 
     def set_completed_all(self, mode: str) -> None:
         self.store.update_settings(completed=mode)
@@ -251,6 +333,35 @@ class Controller(QObject):
             self._desktop = current
             self.recreate_windows()
 
+    # ------------------------------------------------------------------ monitors
+    def _watch_screen(self, screen, changed: bool = True) -> None:
+        screen.geometryChanged.connect(self._screens_changed)
+        if changed:
+            self._screens_changed()
+
+    def _screens_changed(self, *_) -> None:
+        self.settling = True
+        self._relayout.start()
+
+    def _apply_layout(self) -> None:
+        self.layout_key = screens.current_key()
+        self._fit_all()
+        QTimer.singleShot(1000, self, self._settled)
+
+    def _settled(self) -> None:
+        if self._relayout.isActive():   # the monitors changed again meanwhile
+            return
+        # Windows sometimes moves windows once more shortly after a display change; undo that too.
+        self._fit_all()
+        self.settling = False
+
+    def _fit_all(self) -> None:
+        """Put every note where it belongs for the monitors connected now, one after another so each
+        keeps clear of those already placed."""
+        placed: list[QRect] = []
+        for window in self.windows.values():
+            placed.append(window.fit_to_screens(placed))
+
     def quit(self) -> None:
         for window in self.windows.values():
             window._save_geometry()
@@ -263,6 +374,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     system.configure_app(app)
+    theme.load_bundled_fonts()
     app.setQuitOnLastWindowClosed(False)
     app.setFont(theme.font(9.5))
     app.setStyleSheet(theme.tooltip_qss())

@@ -17,7 +17,8 @@ from PySide6.QtCore import Qt
 from . import SLUG
 
 LAUNCHER = "AwesomeStickyNotes.py"
-AGENT_LABEL = "com.dee.awesomestickynotes"
+BUNDLE_ID = "com.dee.awesomestickynotes"   # the identifier in "Awesome Sticky Notes.app"
+AGENT_LABEL = BUNDLE_ID
 AGENT_PATH = Path.home() / "Library" / "LaunchAgents" / f"{AGENT_LABEL}.plist"
 
 # kCGDesktopIconWindowLevel + 1: above the desktop and its icons, below every app window.
@@ -57,6 +58,14 @@ def window_flags(kind: str) -> Qt.WindowType:
 
 def prepare(widget) -> None:
     widget.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+
+
+def move_phase(event_type, message) -> str | None:
+    return None   # not reported on macOS: notes tidy up once they have stopped moving instead
+
+
+def click_through(widget, event_type, message, solid) -> int | None:
+    return None   # not done on macOS yet: the faint edge of a shadow still catches clicks there
 
 
 def shell_token() -> int:
@@ -130,10 +139,15 @@ def fallback_data_dir() -> Path:
     return Path.home() / "Library" / "Application Support" / SLUG
 
 
+def app_bundle() -> Path | None:
+    """The "Awesome Sticky Notes.app" this copy of the code runs from, if it runs from one."""
+    return next((p for p in Path(__file__).resolve().parents if p.suffix == ".app"), None)
+
+
 # ---------------------------------------------------------------- start at login
 def launch_arguments() -> list[str]:
-    if getattr(sys, "frozen", False):        # packaged as an .app
-        return [sys.executable]
+    if getattr(sys, "frozen", False) or app_bundle() is not None:
+        return ["/usr/bin/open", "-b", BUNDLE_ID]   # finds the app wherever it has been moved to
     script = Path(__file__).resolve().parent.parent / LAUNCHER
     return [sys.executable, str(script)]
 

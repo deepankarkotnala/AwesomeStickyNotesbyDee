@@ -45,6 +45,55 @@ def _clock() -> QPainterPath:
     return p
 
 
+def _repeat() -> QPainterPath:
+    p = _lines([(17, 2.5), (20.5, 6), (17, 9.5)], [(7, 21.5), (3.5, 18), (7, 14.5)])
+    p.moveTo(3.5, 11.5)
+    p.lineTo(3.5, 10)
+    p.arcTo(QRectF(3.5, 6, 8, 8), 180, -90)
+    p.lineTo(20.5, 6)
+    p.moveTo(20.5, 12.5)
+    p.lineTo(20.5, 14)
+    p.arcTo(QRectF(12.5, 10, 8, 8), 0, -90)
+    p.lineTo(3.5, 18)
+    return p
+
+
+def _brush() -> QPainterPath:
+    p = _lines([(10.5, 13.5), (18.8, 5.2)])
+    p.addEllipse(QRectF(17.6, 3.0, 3.6, 3.6))
+    p.moveTo(9.2, 14.2)
+    p.cubicTo(6.2, 13.6, 4.4, 15.8, 4.6, 18.2)
+    p.cubicTo(4.7, 19.6, 3.8, 20.4, 3.2, 20.8)
+    p.cubicTo(6.4, 21.6, 10.4, 20.6, 10.9, 17.0)
+    p.cubicTo(11.1, 15.6, 10.4, 14.6, 9.2, 14.2)
+    return p
+
+
+def _copy() -> QPainterPath:
+    p = QPainterPath()
+    p.addRoundedRect(QRectF(8.5, 8.5, 12, 12), 2.5, 2.5)
+    p.moveTo(15.5, 8.5)
+    p.lineTo(15.5, 6)
+    p.quadTo(15.5, 3.5, 13, 3.5)
+    p.lineTo(6, 3.5)
+    p.quadTo(3.5, 3.5, 3.5, 6)
+    p.lineTo(3.5, 13)
+    p.quadTo(3.5, 15.5, 6, 15.5)
+    p.lineTo(8.5, 15.5)
+    return p
+
+
+def _paste() -> QPainterPath:
+    p = QPainterPath()
+    p.addRoundedRect(QRectF(5, 4.5, 14, 17), 2.5, 2.5)
+    p.addRoundedRect(QRectF(9, 2.5, 6, 4), 1.5, 1.5)
+    p.moveTo(9, 12)
+    p.lineTo(15, 12)
+    p.moveTo(9, 16)
+    p.lineTo(13, 16)
+    return p
+
+
 def _trash() -> QPainterPath:
     p = _lines([(4, 6.5), (20, 6.5)], [(9.5, 6.5), (9.5, 4), (14.5, 4), (14.5, 6.5)])
     p.moveTo(6, 6.5)
@@ -118,6 +167,10 @@ _DEFS = {
     "chevron_down": lambda: (_lines([(6, 9.5), (12, 15.5), (18, 9.5)]), None),
     "bell": lambda: (_bell(), None),
     "clock": lambda: (_clock(), None),
+    "repeat": lambda: (_repeat(), None),
+    "brush": lambda: (_brush(), None),
+    "copy": lambda: (_copy(), None),
+    "paste": lambda: (_paste(), None),
     "trash": lambda: (_trash(), None),
     "eye": lambda: (_eye(), None),
     "eye_off": lambda: (_eye_off(), None),

@@ -16,13 +16,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
-from .system import fallback_data_dir
+from . import repeat
+from .system import app_bundle, fallback_data_dir
 
 LEGACY_NAME = "StickyNotesDee"         # folder name used by the first versions
 DB_FOLDER = "StickyNotesDB"
 OLD_DB_FOLDERS = ("DeeStickyNotesDB",)   # earlier names of DB_FOLDER, renamed automatically
 DB_FILE = "notes.db"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 9
 DEFAULT_FONT_SIZE = 10.5
 DEFAULT_SATURATION = 0.5
 
@@ -43,7 +44,18 @@ CREATE TABLE IF NOT EXISTS notes (
     font_family TEXT    NOT NULL DEFAULT '',
     font_size   REAL    NOT NULL DEFAULT 10.5,
     saturation  REAL    NOT NULL DEFAULT 0.5,
-    deleted_at  TEXT
+    deleted_at  TEXT,
+    layouts     TEXT    NOT NULL DEFAULT '{}',
+    style       TEXT    NOT NULL DEFAULT '3d',
+    emoji       TEXT    NOT NULL DEFAULT '',
+    header      TEXT    NOT NULL DEFAULT 'plain',
+    background  TEXT    NOT NULL DEFAULT 'plain',
+    color2      TEXT    NOT NULL DEFAULT '',
+    checkbox    TEXT    NOT NULL DEFAULT 'circle',
+    done_look   TEXT    NOT NULL DEFAULT 'strike',
+    title_font  TEXT    NOT NULL DEFAULT '',
+    text_color  TEXT    NOT NULL DEFAULT '',
+    spacing     TEXT    NOT NULL DEFAULT 'normal'
 );
 CREATE TABLE IF NOT EXISTS tasks (
     id        TEXT PRIMARY KEY,
@@ -57,7 +69,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     reminded  INTEGER NOT NULL DEFAULT 0,
     "order"   REAL NOT NULL DEFAULT 0,
     deleted_at TEXT,
-    pinned    INTEGER NOT NULL DEFAULT 0
+    pinned    INTEGER NOT NULL DEFAULT 0,
+    repeat    TEXT NOT NULL DEFAULT '',
+    repeat_from TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_note ON tasks(note_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_done_at ON tasks(done_at);
@@ -75,7 +89,26 @@ MIGRATIONS = {
     4: ["ALTER TABLE notes ADD COLUMN deleted_at TEXT",
         "ALTER TABLE tasks ADD COLUMN deleted_at TEXT"],
     5: ["ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"],
+    6: ["ALTER TABLE notes ADD COLUMN layouts TEXT NOT NULL DEFAULT '{}'"],
+    7: ["ALTER TABLE tasks ADD COLUMN repeat TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE tasks ADD COLUMN repeat_from TEXT"],
+    8: ["ALTER TABLE notes ADD COLUMN style TEXT NOT NULL DEFAULT '3d'"],
+    9: [f"ALTER TABLE notes ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'" for column, default in (
+        ("emoji", ""), ("header", "plain"), ("background", "plain"), ("color2", ""), ("checkbox", "circle"),
+        ("done_look", "strike"), ("title_font", ""), ("text_color", ""), ("spacing", "normal"))],
 }
+
+# A note's look, in the groups that can be copied to other notes (see Controller.apply_to_all / copy_style).
+LOOK_GROUPS = {
+    "colour": ("color", "saturation", "color2", "text_color"),
+    "style": ("style", "background", "header", "checkbox", "done_look", "spacing"),
+    "font": ("font_family", "font_size", "title_font"),
+}
+
+
+def look_of(note, groups=tuple(LOOK_GROUPS)) -> dict:
+    """The note's look (colour, card style, fonts...), as changes to give another note."""
+    return {field: getattr(note, field) for group in groups for field in LOOK_GROUPS[group]}
 
 
 def app_root() -> Path:
@@ -129,8 +162,8 @@ def data_dir() -> Path:
     override = os.environ.get("STICKYNOTES_DATA_DIR")
     if override:
         candidates = [Path(override)]
-    elif getattr(sys, "frozen", False) and sys.platform == "darwin":
-        candidates = [fallback_data_dir()]   # never write inside a signed .app bundle
+    elif sys.platform == "darwin" and (getattr(sys, "frozen", False) or app_bundle() is not None):
+        candidates = [fallback_data_dir()]   # never write inside an .app: it may be read-only or replaced
     else:
         candidates = [_current_db_folder(), fallback_data_dir()]
     for path in candidates:
@@ -199,6 +232,8 @@ class Task:
     order: float = 0.0
     deleted_at: str | None = None   # set while it sits in the Recycle Bin
     pinned: bool = False            # kept at the top of its note
+    repeat: str = ""                # how the reminder repeats, e.g. "15min", "1d", "weekdays" (see repeat.py)
+    repeat_from: str | None = None  # when a repeating reminder's series began
 
     @property
     def created_date(self) -> date:
@@ -216,13 +251,22 @@ class Task:
     def deleted_dt(self) -> datetime | None:
         return from_iso(self.deleted_at)
 
+    @property
+    def repeat_from_dt(self) -> datetime | None:
+        return from_iso(self.repeat_from)
+
+    def next_reminder(self, after: datetime) -> datetime | None:
+        """For a repeating reminder: its first time later than `after`."""
+        start = self.repeat_from_dt or self.remind_dt
+        return repeat.next_after(self.repeat, start, after) if self.repeat and start else None
+
 
 @dataclass
 class Note:
     id: str = field(default_factory=new_id)
     title: str = "Today"
     kind: str = "daily"             # daily | checklist
-    color: str = "lemon"
+    color: str = "lemon"            # a palette name from theme.py, or a custom colour as "#RRGGBB"
     x: int | None = None
     y: int | None = None
     w: int = 340
@@ -235,6 +279,17 @@ class Note:
     font_size: float = DEFAULT_FONT_SIZE
     saturation: float = DEFAULT_SATURATION  # 0 = barely tinted, 0.5 = classic pastel, 1 = full colour
     deleted_at: str | None = None   # set while it sits in the Recycle Bin
+    layouts: str = "{}"             # JSON: position per monitor arrangement (see screens.py)
+    style: str = "3d"               # flat | soft (flat with a soft shadow) | 3d (glossy) | paper
+    emoji: str = ""                 # shown before the title
+    header: str = "plain"           # title area: plain | tinted | solid (the accent colour)
+    background: str = "plain"       # plain | lined | grid | dots | gradient
+    color2: str = ""                # where a gradient ends: a palette name or "#RRGGBB"; "" = a deeper shade
+    checkbox: str = "circle"        # circle | square | heart
+    done_look: str = "strike"       # finished tasks: strike (struck through) | fade
+    title_font: str = ""            # "" = the system's display font
+    text_color: str = ""            # "#RRGGBB", or "" for dark or light text to suit the colour
+    spacing: str = "normal"         # compact | normal | roomy
 
     @property
     def deleted_dt(self) -> datetime | None:
@@ -246,7 +301,9 @@ class Settings:
     autostart: bool = False
     pin: str = "desktop"
     completed: str = "strike"
-    snooze_minutes: int = 10
+    style: str = "3d"               # card style for new notes
+    radius: int = 16                # corner roundness of every note, in px
+    recent_colors: str = ""         # custom colours used lately, newest first, comma-separated
 
 
 def _columns(cls) -> list[str]:
@@ -399,6 +456,7 @@ class Store(QObject):
 
     def add_note(self, kind: str = "daily", **props) -> Note:
         props.setdefault("title", "Today" if kind == "daily" else "Checklist")
+        props.setdefault("style", self.settings.style)
         note = Note(kind=kind, pin=self.settings.pin, completed=self.settings.completed, **props)
         self.notes.append(note)
         self._save_note(note)
@@ -467,13 +525,34 @@ class Store(QObject):
         self._save_task(task)
         self.note_changed.emit(task.note_id)
 
+    def set_reminder(self, task: Task, when: datetime | None, repeat_code: str | None = None) -> None:
+        """Remind about `task` at `when`; None removes the reminder and any repeat.
+
+        `repeat_code` is how it repeats ("" for once, see repeat.py); None keeps the task's current repeat.
+        A repeat runs from `when`, so if that time has passed the next reminder is the series' next time.
+        """
+        if when is None:
+            self.update_task(task, remind_at=None, reminded=False, repeat="", repeat_from=None)
+            return
+        code = task.repeat if repeat_code is None else repeat_code
+        upcoming = when
+        if code and when <= now():
+            upcoming = repeat.next_after(code, when, now()) or when
+        self.update_task(task, remind_at=to_iso(upcoming), reminded=False, repeat=code,
+                         repeat_from=to_iso(when) if code else None)
+
     def set_pinned(self, task: Task, pinned: bool) -> None:
         """Pin a task (it joins the end of the pinned tasks) or unpin it (it leads the unpinned ones)."""
         orders = [t.order for t in self.tasks if t.note_id == task.note_id]
         self.update_task(task, pinned=pinned, order=max(orders) + 1 if pinned else min(orders) - 1)
 
     def set_done(self, task: Task, done: bool) -> None:
-        self.update_task(task, done=done, archived=False, done_at=to_iso(now()) if done else None)
+        """Ticking a task off also stops its reminders. Unticking a repeating one picks the series up at
+        its next time, so it doesn't fire at once for a time that went by while it was done."""
+        changes = {"done": done, "archived": False, "done_at": to_iso(now()) if done else None}
+        if not done and task.repeat and task.remind_dt and task.remind_dt <= now():
+            changes.update(remind_at=to_iso(task.next_reminder(now())), reminded=False)
+        self.update_task(task, **changes)
 
     def delete_task(self, task: Task) -> None:
         """Move a task to the Recycle Bin."""
