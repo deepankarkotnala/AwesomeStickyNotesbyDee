@@ -12,9 +12,46 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase
 IS_MAC = sys.platform == "darwin"
 
 DANGER = "#E5484D"
-HUB_BG = "#F5F5F7"
-HUB_TEXT = "#1C1C1E"
-HUB_ACCENT = "#0A84FF"
+
+
+@dataclass(frozen=True)
+class Chrome:
+    """Colours for everything that isn't a note: the hub, dialogs, panels, the calendar and the tray menu.
+    Colours with transparency are written #AARRGGBB; use rgba() to put them in a style sheet."""
+    dark: bool
+    bg: str            # window background
+    surface: str       # cards, dialogs, panels, pop-ups
+    text: str
+    sub: str           # secondary text
+    accent: str        # buttons, selection, links
+    field: str         # input fields and small buttons
+    field_hover: str
+    line: str          # hairlines and borders
+    icon: str          # grey icons
+    track: str         # behind a segmented control
+    thumb: str         # its selected segment
+    scroll: str        # scrollbar handle
+    scroll_hover: str
+
+
+# Apple's system greys, light and dark. Text and secondary text are at least 4.5:1 on every background,
+# and white text on the accent at least 3.6:1 (4.6:1 in light mode).
+LIGHT_UI = Chrome(False, "#F5F5F7", "#FFFFFF", "#1C1C1E", "#BF3C3C43", "#0071E3", "#F2F2F7", "#E5E5EA", "#14000000",
+                  "#636366", "#1E767680", "#FFFFFF", "#28000000", "#46000000")
+DARK_UI = Chrome(True, "#1C1C1E", "#2C2C2E", "#F2F2F7", "#A6EBEBF5", "#0A84FF", "#3A3A3C", "#48484A", "#24FFFFFF",
+                 "#AEAEB2", "#3D767680", "#636366", "#32FFFFFF", "#5AFFFFFF")
+APPEARANCES = (("system", "System"), ("light", "Light"), ("dark", "Dark"))
+_ui = LIGHT_UI
+
+
+def ui() -> Chrome:
+    """The colours of the app's own windows right now (see Controller.apply_appearance)."""
+    return _ui
+
+
+def set_dark(dark: bool) -> None:
+    global _ui
+    _ui = DARK_UI if dark else LIGHT_UI
 
 # macOS draws 1 pt as 1 px, Windows as 1.33 px; scale on the Mac so notes look the same size on both.
 FONT_SCALE = 96 / 72 if IS_MAC else 1.0

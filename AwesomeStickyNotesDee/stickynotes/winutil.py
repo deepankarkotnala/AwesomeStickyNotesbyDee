@@ -137,10 +137,18 @@ def remove_frame(widget) -> None:
     _dwm_set(widget, 34, ctypes.c_uint(0xFFFFFFFE))    # DWMWA_BORDER_COLOR = COLOR_NONE
 
 
-def set_caption_color(widget, hex_color: str) -> None:
-    """Tint the Windows 11 title bar to match the window background (ignored on older Windows)."""
+def _colorref(hex_color: str) -> ctypes.c_uint32:
     r, g, b = (int(hex_color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
-    _dwm_set(widget, 35, ctypes.c_uint32(r | (g << 8) | (b << 16)))   # DWMWA_CAPTION_COLOR
+    return ctypes.c_uint32(r | (g << 8) | (b << 16))
+
+
+def set_caption_color(widget, hex_color: str, text_color: str | None = None, dark: bool = False) -> None:
+    """Colour the Windows 11 title bar to match the window: its background, its text, and light or dark
+    minimise/close buttons (ignored on older Windows)."""
+    _dwm_set(widget, 20, ctypes.c_int(1 if dark else 0))             # DWMWA_USE_IMMERSIVE_DARK_MODE
+    _dwm_set(widget, 35, _colorref(hex_color))                       # DWMWA_CAPTION_COLOR
+    if text_color:
+        _dwm_set(widget, 36, _colorref(text_color))                  # DWMWA_TEXT_COLOR
 
 
 def animations_enabled() -> bool:

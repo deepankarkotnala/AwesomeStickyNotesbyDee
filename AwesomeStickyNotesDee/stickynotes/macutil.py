@@ -95,8 +95,8 @@ def remove_frame(widget) -> None:
     """Frameless windows have no system border on macOS."""
 
 
-def set_caption_color(widget, hex_color: str) -> None:
-    """The macOS title bar follows the system appearance."""
+def set_caption_color(widget, hex_color: str, text_color: str | None = None, dark: bool = False) -> None:
+    """The macOS title bar follows the app's light or dark appearance by itself."""
 
 
 def animations_enabled() -> bool:

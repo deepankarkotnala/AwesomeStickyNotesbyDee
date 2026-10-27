@@ -16,33 +16,43 @@ from .store import Note, Task, data_dir
 from .timeparse import clock, day_label, friendly
 from .widgets import IconButton, Pill, PillButton, Segmented, Toggle
 
-TEXT, SUB = QColor(theme.HUB_TEXT), QColor(60, 60, 67, 150)
+def ink() -> QColor:
+    """Text colour in the app's current light or dark look (see theme.ui)."""
+    return QColor(theme.ui().text)
 
-HUB_QSS = f"""
-QWidget#hub {{ background: {theme.HUB_BG}; }}
-QWidget {{ color: {theme.HUB_TEXT}; }}
-QScrollArea, QWidget#pageContent {{ background: transparent; border: none; }}
-QFrame#card {{ background: #FFFFFF; border: 1px solid rgba(0, 0, 0, 12); border-radius: 14px; }}
-QFrame#divider {{ background: rgba(0, 0, 0, 14); border: none; }}
-QLineEdit#search {{
-    background: #FFFFFF; border: 1px solid rgba(0, 0, 0, 20); border-radius: 9px; padding: 7px 10px;
-    selection-background-color: {theme.HUB_ACCENT};
-}}
-QLineEdit#search:focus {{ border: 1px solid {theme.HUB_ACCENT}; }}
-QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px 0; }}
-QScrollBar::handle:vertical {{ background: rgba(0, 0, 0, 40); border-radius: 4px; min-height: 30px; margin: 0 2px; }}
-QScrollBar::handle:vertical:hover {{ background: rgba(0, 0, 0, 70); }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
-""" + theme.tooltip_qss()
+
+def muted() -> QColor:
+    """Secondary text colour."""
+    return QColor(theme.ui().sub)
+
+
+def hub_qss() -> str:
+    ui, css = theme.ui(), theme.rgba
+    return f"""
+    QWidget#hub {{ background: {ui.bg}; }}
+    QWidget {{ color: {ui.text}; }}
+    QScrollArea, QWidget#pageContent {{ background: transparent; border: none; }}
+    QFrame#card {{ background: {ui.surface}; border: 1px solid {css(ui.line)}; border-radius: 14px; }}
+    QFrame#divider {{ background: {css(ui.line)}; border: none; }}
+    QLineEdit#search {{
+        background: {ui.surface}; color: {ui.text}; border: 1px solid {css(ui.line)}; border-radius: 9px;
+        padding: 7px 10px; selection-background-color: {ui.accent}; selection-color: #FFFFFF;
+    }}
+    QLineEdit#search:focus {{ border: 1px solid {ui.accent}; }}
+    QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px 0; }}
+    QScrollBar::handle:vertical {{ background: {css(ui.scroll)}; border-radius: 4px; min-height: 30px; margin: 0 2px; }}
+    QScrollBar::handle:vertical:hover {{ background: {css(ui.scroll_hover)}; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+    """ + theme.tooltip_qss()
 
 
 # ---------------------------------------------------------------- helpers
-def label(text: str, pt: float = 10, weight=QFont.Weight.Normal, color: QColor = TEXT,
+def label(text: str, pt: float = 10, weight=QFont.Weight.Normal, color: QColor | None = None,
           wrap: bool = False, display: bool = False) -> QLabel:
     lbl = QLabel(text)
     lbl.setFont(theme.font(pt, weight, display))
-    lbl.setStyleSheet(f"color: {theme.rgba(color)};")
+    lbl.setStyleSheet(f"color: {theme.rgba(color or ink())};")
     lbl.setWordWrap(wrap)
     return lbl
 
@@ -52,7 +62,7 @@ def section_label(text: str) -> QLabel:
     f = theme.font(8, QFont.Weight.Bold)
     f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.7)
     lbl.setFont(f)
-    lbl.setStyleSheet(f"color: {theme.rgba(SUB)};")
+    lbl.setStyleSheet(f"color: {theme.rgba(muted())};")
     lbl.setContentsMargins(6, 14, 0, 6)
     return lbl
 
@@ -155,7 +165,7 @@ def empty_message(title: str, subtitle: str) -> QWidget:
     w = QWidget()
     lay = QVBoxLayout(w)
     lay.setContentsMargins(0, 70, 0, 0)
-    for lbl in (label(title, 12, QFont.Weight.DemiBold), label(subtitle, 9.5, color=SUB, wrap=True)):
+    for lbl in (label(title, 12, QFont.Weight.DemiBold), label(subtitle, 9.5, color=muted(), wrap=True)):
         lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(lbl)
     return w
@@ -187,7 +197,7 @@ class SelectDot(QAbstractButton):
         r = QRectF(self.rect()).adjusted(2, 2, -2, -2)
         if self.isChecked():
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(theme.HUB_ACCENT))
+            p.setBrush(QColor(theme.ui().accent))
             p.drawEllipse(r)
             icons.paint(p, "check", r.adjusted(4.5, 4.8, -4.5, -4.2), "#FFFFFF", 3.0)
         else:
@@ -297,7 +307,7 @@ class NoteTile(QFrame):
         radius = 3.0 if self.note.style == "paper" else 14.0
         decor.paint_card(p, r, self.note, self.pal, radius, 0.0, r.top() + self.TITLE_BOTTOM, scale=0.85)
         if self.select.isChecked():          # selected: an accent outline
-            p.setPen(QPen(QColor(theme.HUB_ACCENT), 2.5))
+            p.setPen(QPen(QColor(theme.ui().accent), 2.5))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
 
@@ -316,10 +326,10 @@ class NotesPage(Page):
         top = QHBoxLayout(self.top)
         top.setContentsMargins(0, 0, 0, 0)
         top.addWidget(label("Your notes", 12, QFont.Weight.DemiBold))
-        top.addWidget(label("Hover a note and tick its circle to restyle several at once", 9, color=SUB))
+        top.addWidget(label("Hover a note and tick its circle to restyle several at once", 9, color=muted()))
         top.addStretch(1)
         for text, kind in (("+  Daily note", "daily"), ("+  Checklist", "checklist")):
-            b = PillButton(text, theme.HUB_ACCENT, primary=kind == "daily")
+            b = PillButton(text, theme.ui().accent, primary=kind == "daily")
             b.clicked.connect(lambda _=False, k=kind: self.ctl.new_note(k))
             top.addWidget(b)
         root.addWidget(self.top)
@@ -330,13 +340,13 @@ class NotesPage(Page):
         self.count = label("", 12, QFont.Weight.DemiBold)
         bar.addWidget(self.count)
         bar.addStretch(1)
-        customise = PillButton("Customise…", theme.HUB_ACCENT, primary=True)
+        customise = PillButton("Customise…", theme.ui().accent, primary=True)
         customise.clicked.connect(lambda: self.ctl.customise(self._chosen()))
-        self.paste = PillButton("Paste style", theme.HUB_ACCENT)
+        self.paste = PillButton("Paste style", theme.ui().accent)
         self.paste.clicked.connect(lambda: self.ctl.paste_style(self._chosen()))
-        everything = PillButton("Select all", theme.HUB_ACCENT)
+        everything = PillButton("Select all", theme.ui().accent)
         everything.clicked.connect(self.select_all)
-        cancel = PillButton("Cancel", theme.HUB_ACCENT)
+        cancel = PillButton("Cancel", theme.ui().accent)
         cancel.clicked.connect(self.clear_selection)
         for b in (customise, self.paste, everything, cancel):
             bar.addWidget(b)
@@ -390,7 +400,7 @@ class NotesPage(Page):
 # ---------------------------------------------------------------- completed history
 class TaskLine(QWidget):
     def __init__(self, glyph: QWidget, text: str, pill: QWidget, meta: str, actions: list[IconButton],
-                 meta_color: QColor = SUB):
+                 meta_color: QColor | None = None):
         super().__init__()
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 9, 8, 9)
@@ -400,7 +410,7 @@ class TaskLine(QWidget):
         txt.setMinimumWidth(120)
         lay.addWidget(txt, 1)
         lay.addWidget(pill)
-        m = label(meta, 9, color=meta_color)
+        m = label(meta, 9, color=meta_color or muted())
         m.setMinimumWidth(64)
         m.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(m)
@@ -426,7 +436,7 @@ class CompletedPage(Page):
         self.search.textChanged.connect(lambda: self.refresh())
         top.addWidget(self.search)
         top.addStretch(1)
-        self.count = label("", 9.5, color=SUB)
+        self.count = label("", 9.5, color=muted())
         top.addWidget(self.count)
         root.addLayout(top)
         area, self.lay = scroll_page(self)
@@ -451,9 +461,9 @@ class CompletedPage(Page):
             card = Card()
             for t in tasks:
                 note = self.store.note(t.note_id)
-                restore = IconButton("undo", "#636366", 28, 15, "Restore to note (mark as not done)")
+                restore = IconButton("undo", theme.ui().icon, 28, 15, "Restore to note (mark as not done)")
                 restore.clicked.connect(lambda _=False, task=t: self.store.set_done(task, False))
-                delete = IconButton("trash", "#636366", 28, 15, "Move to Recycle Bin")
+                delete = IconButton("trash", theme.ui().icon, 28, 15, "Move to Recycle Bin")
                 delete.clicked.connect(lambda _=False, task=t: self.store.delete_task(task))
                 accent = theme.palette(note.color).accent if note else "#8E8E93"
                 card.add_row(TaskLine(Dot("check", accent), t.text, note_pill(note), clock(t.done_dt),
@@ -491,16 +501,16 @@ class RemindersPage(Page):
             for t in tasks:
                 note = self.store.note(t.note_id)
                 overdue = t.remind_dt < now
-                done = IconButton("check", "#636366", 28, 15, "Mark done")
+                done = IconButton("check", theme.ui().icon, 28, 15, "Mark done")
                 done.clicked.connect(lambda _=False, task=t: self.store.set_done(task, True))
-                remove = IconButton("x", "#636366", 28, 15, "Remove reminder")
+                remove = IconButton("x", theme.ui().icon, 28, 15, "Remove reminder")
                 remove.clicked.connect(lambda _=False, task=t: self.store.set_reminder(task, None))
-                color = theme.DANGER if overdue else (theme.palette(note.color).accent if note else theme.HUB_ACCENT)
+                color = theme.DANGER if overdue else (theme.palette(note.color).accent if note else theme.ui().accent)
                 meta = friendly(t.remind_dt) if overdue else clock(t.remind_dt)
                 if t.repeat:
                     meta += f"  ·  {repeat.short(t.repeat)}"
                 card.add_row(TaskLine(Dot("repeat" if t.repeat else "bell", color), t.text, note_pill(note), meta,
-                                      [done, remove], QColor(theme.DANGER) if overdue else SUB))
+                                      [done, remove], QColor(theme.DANGER) if overdue else muted()))
             self.lay.addWidget(card)
         self.lay.addStretch(1)
 
@@ -519,7 +529,7 @@ class BinPage(Page):
         self.section.changed.connect(lambda _: self.refresh())
         top.addWidget(self.section)
         top.addStretch(1)
-        top.addWidget(label("Kept until you empty the bin", 9.5, color=SUB))
+        top.addWidget(label("Kept until you empty the bin", 9.5, color=muted()))
         self.empty_btn = PillButton("Empty bin", theme.DANGER, primary=True)
         self.empty_btn.clicked.connect(self._empty)
         top.addWidget(self.empty_btn)
@@ -557,19 +567,19 @@ class BinPage(Page):
     def _note_line(self, note: Note) -> TaskLine:
         count = sum(1 for t in self.store.bin_tasks if t.note_id == note.id and not t.deleted_at)
         kind = "Daily to-do" if note.kind == "daily" else "Checklist"
-        pill = Pill(f"{kind}  ·  {plural(count, 'task')}", QColor("#636366"), QColor(118, 118, 128, 30))
-        restore = IconButton("undo", "#636366", 28, 15, "Restore note")
+        pill = Pill(f"{kind}  ·  {plural(count, 'task')}", QColor(theme.ui().icon), QColor(theme.ui().track))
+        restore = IconButton("undo", theme.ui().icon, 28, 15, "Restore note")
         restore.clicked.connect(lambda: self.store.restore_note(note))
-        purge = IconButton("trash", "#636366", 28, 15, "Delete forever")
+        purge = IconButton("trash", theme.ui().icon, 28, 15, "Delete forever")
         purge.clicked.connect(lambda: self._purge_note(note, count))
         return TaskLine(Dot("dot", theme.palette(note.color).accent), note.title, pill,
                         clock(note.deleted_dt), [restore, purge])
 
     def _task_line(self, task: Task) -> TaskLine:
         note = self.store.note(task.note_id)
-        restore = IconButton("undo", "#636366", 28, 15, "Restore to note")
+        restore = IconButton("undo", theme.ui().icon, 28, 15, "Restore to note")
         restore.clicked.connect(lambda: self.store.restore_task(task))
-        purge = IconButton("trash", "#636366", 28, 15, "Delete forever")
+        purge = IconButton("trash", theme.ui().icon, 28, 15, "Delete forever")
         purge.clicked.connect(lambda: self.store.purge_task(task))
         accent = theme.palette(note.color).accent
         return TaskLine(Dot("check" if task.done else "dot", accent), task.text, note_pill(note),
@@ -618,9 +628,15 @@ class SettingsPage(Page):
 
         lay.addWidget(section_label("Appearance"))
         look = Card()
+        self.appearance = Segmented(list(theme.APPEARANCES), s.appearance)
+        self.appearance.changed.connect(self.ctl.set_appearance)
+        look.add_row(self._row("Theme",
+                               "Light or dark for this window, dialogs, the calendar and menus. System follows your "
+                               f"{'Mac' if system.IS_MAC else 'Windows'} setting as it changes. Notes keep their own "
+                               "colours.", self.appearance))
         self.style = Segmented([(key, name) for key, name, _ in theme.STYLES], s.style)
         self.style.changed.connect(lambda v: self.store.update_settings(style=v))
-        apply_style = PillButton("Apply to all notes", theme.HUB_ACCENT)
+        apply_style = PillButton("Apply to all notes", theme.ui().accent)
         apply_style.setToolTip("Give every note this style now")
         apply_style.clicked.connect(lambda: self.ctl.set_style_all(self.style.current))
         style_box = QWidget()
@@ -649,17 +665,19 @@ class SettingsPage(Page):
             rl = QHBoxLayout(row)
             rl.setContentsMargins(12, 10, 12, 10)
             rl.setSpacing(14)
-            pill = Pill(code, QColor(theme.HUB_ACCENT), QColor(10, 132, 255, 26))
+            tint = QColor(theme.ui().accent)
+            tint.setAlpha(60 if theme.ui().dark else 26)
+            pill = Pill(code, QColor(theme.ui().accent), tint)
             pill.setFixedWidth(max(pill.width(), 120))
             rl.addWidget(pill)
-            rl.addWidget(label(meaning, 9.5, color=SUB), 1)
+            rl.addWidget(label(meaning, 9.5, color=muted()), 1)
             tips.add_row(row)
         lay.addWidget(tips)
 
         lay.addWidget(section_label("Data"))
         data = Card()
         path = data_dir() / "notes.db"
-        open_btn = PillButton("Open folder", theme.HUB_ACCENT)
+        open_btn = PillButton("Open folder", theme.ui().accent)
         open_btn.clicked.connect(lambda: system.open_folder(data_dir()))
         data.add_row(self._row("Stored locally in SQLite", str(path), open_btn, selectable=True))
         lay.addWidget(data)
@@ -676,7 +694,7 @@ class SettingsPage(Page):
         col = QVBoxLayout()
         col.setSpacing(2)
         col.addWidget(label(APP_NAME, 12, QFont.Weight.DemiBold))
-        col.addWidget(label(f"Version {__version__}", 9, color=SUB))
+        col.addWidget(label(f"Version {__version__}", 9, color=muted()))
         col.addSpacing(6)
         col.addWidget(label(f"Developed by {DEVELOPER}", 10, QFont.Weight.Medium))
         rl.addLayout(col, 1)
@@ -693,7 +711,7 @@ class SettingsPage(Page):
         col = QVBoxLayout()
         col.setSpacing(2)
         col.addWidget(label(title, 10.5, QFont.Weight.Medium))
-        sub = label(subtitle, 9, color=SUB, wrap=True)
+        sub = label(subtitle, 9, color=muted(), wrap=True)
         if selectable:
             sub.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         col.addWidget(sub)
@@ -706,6 +724,7 @@ class SettingsPage(Page):
         self.pin.set_current(s.pin)
         self.completed.set_current(s.completed)
         self.style.set_current(s.style)
+        self.appearance.set_current(s.appearance)
         self.radius.set_current(str(s.radius))
         self.autostart.blockSignals(True)
         self.autostart.setChecked(system.autostart_enabled())
@@ -724,7 +743,7 @@ class HubWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(controller.icon)
-        self.setStyleSheet(HUB_QSS)
+        self.setStyleSheet(hub_qss())
         self.resize(900, 680)
         self.setMinimumSize(800, 520)
 
@@ -735,7 +754,7 @@ class HubWindow(QWidget):
         titles = QVBoxLayout()
         titles.setSpacing(0)
         titles.addWidget(label(APP_SHORT_NAME, 20, QFont.Weight.Bold, display=True))
-        self.summary = label("", 9.5, color=SUB)
+        self.summary = label("", 9.5, color=muted())
         titles.addWidget(self.summary)
         top.addLayout(titles)
         top.addStretch(1)
@@ -780,5 +799,6 @@ class HubWindow(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
-        system.set_caption_color(self, theme.HUB_BG)
+        ui = theme.ui()
+        system.set_caption_color(self, ui.bg, ui.text, ui.dark)
         self.refresh()

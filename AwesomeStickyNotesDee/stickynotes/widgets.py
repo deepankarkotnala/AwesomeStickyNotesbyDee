@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation,
+from PySide6.QtCore import (QDate, QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation,
                             Signal)
-from PySide6.QtGui import (QColor, QConicalGradient, QFont, QFontMetrics, QLinearGradient, QPainter,
-                           QPainterPath, QPen, QTextLayout, QTextOption)
-from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QDateTimeEdit, QDialog,
-                               QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
-                               QSizePolicy, QSpinBox, QVBoxLayout, QWidget, QWidgetAction)
+from PySide6.QtGui import (QColor, QConicalGradient, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath,
+                           QPalette, QPen, QTextCharFormat, QTextLayout, QTextOption)
+from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QCalendarWidget, QComboBox,
+                               QDateTimeEdit, QDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QMenu,
+                               QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from . import icons, repeat, system, theme
 from .store import Task
@@ -51,7 +51,7 @@ class IconButton(QAbstractButton):
         super().__init__(parent)
         self.name, self.color = name, QColor(color)
         self.icon_px = icon_size
-        self.hover_bg = hover_bg or QColor(0, 0, 0, 16)
+        self.hover_bg = hover_bg or (QColor(255, 255, 255, 26) if theme.ui().dark else QColor(0, 0, 0, 16))
         self._hover = False
         self._opacity = 1.0
         self._fade = animation(self, 140, self._set_opacity)
@@ -207,9 +207,13 @@ class Pill(QAbstractButton):
 
 
 class PillButton(QPushButton):
-    def __init__(self, text: str, accent: str, primary: bool = False, dark: bool = False, small: bool = False,
+    """A rounded button: filled with `accent` when primary, else a soft grey that suits a light or dark
+    background (`dark`; by default the app's own light or dark windows)."""
+
+    def __init__(self, text: str, accent: str, primary: bool = False, dark: bool | None = None, small: bool = False,
                  parent=None):
         super().__init__(text, parent)
+        dark = theme.ui().dark if dark is None else dark
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFont(theme.font(8.4 if small else 9, QFont.Weight.DemiBold))
         shape = "border-radius: 11px; padding: 0 9px;" if small else "border-radius: 8px; padding: 6px 12px;"
@@ -1143,28 +1147,85 @@ def reminder_presets(ref: datetime | None = None) -> list[tuple[str, datetime]]:
 
 
 # ------------------------------------------------------------------ dialogs
-DIALOG_QSS = f"""
-    QDialog {{ background: #FFFFFF; }}
-    QLabel {{ color: {theme.HUB_TEXT}; }}
-    QDateTimeEdit, QComboBox, QSpinBox {{
-        background: #F2F2F7; border: 1px solid transparent; border-radius: 8px;
-        padding: 7px 10px; color: {theme.HUB_TEXT};
+def dialog_qss() -> str:
+    """Dialogs, fields and drop-down lists in the app's light or dark colours."""
+    ui, css = theme.ui(), theme.rgba
+    return f"""
+    QDialog {{ background: {ui.surface}; }}
+    QLabel {{ color: {ui.text}; }}
+    QDateTimeEdit, QComboBox, QSpinBox, QLineEdit {{
+        background: {ui.field}; border: 1px solid transparent; border-radius: 8px;
+        padding: 7px 10px; color: {ui.text}; selection-background-color: {ui.accent}; selection-color: #FFFFFF;
     }}
-    QDateTimeEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 1px solid {theme.HUB_ACCENT}; }}
+    QDateTimeEdit:focus, QComboBox:focus, QSpinBox:focus, QLineEdit:focus {{ border: 1px solid {ui.accent}; }}
     QDateTimeEdit::drop-down, QComboBox::drop-down {{ border: none; width: 22px; }}
     QComboBox QAbstractItemView {{
-        background: #FFFFFF; color: {theme.HUB_TEXT}; border: 1px solid rgba(0, 0, 0, 28); outline: none;
-        selection-background-color: {theme.HUB_ACCENT}; selection-color: #FFFFFF; padding: 4px;
+        background: {ui.surface}; color: {ui.text}; border: 1px solid {css(ui.line)}; outline: none;
+        selection-background-color: {ui.accent}; selection-color: #FFFFFF; padding: 4px;
     }}
-    QPushButton#step {{ background: #F2F2F7; color: {theme.HUB_TEXT}; border: none; border-radius: 8px; }}
-    QPushButton#step:hover {{ background: #E5E5EA; }}
-"""
+    QPushButton#step {{ background: {ui.field}; color: {ui.text}; border: none; border-radius: 8px; }}
+    QPushButton#step:hover {{ background: {ui.field_hover}; }}
+    """
+
+
+def calendar() -> QCalendarWidget:
+    """The month that drops down from a date field, readable in the app's light and dark colours: no red
+    weekends, today in the accent colour, other months' days greyed."""
+    ui, css = theme.ui(), theme.rgba
+    cal = QCalendarWidget()
+    cal.setGridVisible(False)
+    cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+    cal.setHorizontalHeaderFormat(QCalendarWidget.HorizontalHeaderFormat.ShortDayNames)
+    pal = cal.palette()
+    for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive, QPalette.ColorGroup.Disabled):
+        for role, color in ((QPalette.ColorRole.Window, ui.surface), (QPalette.ColorRole.Base, ui.surface),
+                            (QPalette.ColorRole.AlternateBase, ui.surface), (QPalette.ColorRole.Button, ui.surface),
+                            (QPalette.ColorRole.WindowText, ui.text), (QPalette.ColorRole.Text, ui.text),
+                            (QPalette.ColorRole.ButtonText, ui.text), (QPalette.ColorRole.Highlight, ui.accent),
+                            (QPalette.ColorRole.HighlightedText, "#FFFFFF")):
+            pal.setColor(group, role, QColor(color))
+    faded = QColor(ui.sub)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, faded)   # days of the months either side
+    cal.setPalette(pal)
+    plain = QTextCharFormat()
+    plain.setForeground(QColor(ui.text))
+    for day in (Qt.DayOfWeek.Saturday, Qt.DayOfWeek.Sunday):
+        cal.setWeekdayTextFormat(day, plain)
+    header = QTextCharFormat()
+    header.setForeground(faded)
+    header.setFontWeight(QFont.Weight.DemiBold)
+    cal.setHeaderTextFormat(header)
+    today = QTextCharFormat()
+    today.setForeground(QColor(ui.accent))
+    today.setFontWeight(QFont.Weight.Bold)
+    cal.setDateTextFormat(QDate.currentDate(), today)
+    cal.setStyleSheet(f"""
+        QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: {ui.surface};
+            border-bottom: 1px solid {css(ui.line)}; }}
+        QCalendarWidget QToolButton {{ color: {ui.text}; background: transparent; border: none; border-radius: 7px;
+            padding: 5px 8px; font-weight: 600; }}
+        QCalendarWidget QToolButton:hover {{ background: {ui.field}; }}
+        QCalendarWidget QToolButton::menu-indicator {{ image: none; width: 0; }}
+        QCalendarWidget QMenu {{ background: {ui.surface}; color: {ui.text}; border: 1px solid {css(ui.line)}; }}
+        QCalendarWidget QMenu::item:selected {{ background: {ui.accent}; color: #FFFFFF; }}
+        QCalendarWidget QSpinBox {{ background: {ui.field}; color: {ui.text}; border: none; border-radius: 6px;
+            padding: 2px 6px; selection-background-color: {ui.accent}; selection-color: #FFFFFF; }}
+        QCalendarWidget QAbstractItemView {{ background: {ui.surface}; color: {ui.text}; outline: none; border: none;
+            selection-background-color: {ui.accent}; selection-color: #FFFFFF; }}
+    """)
+    for name, icon in (("qt_calendar_prevmonth", "chevron_left"), ("qt_calendar_nextmonth", "chevron_right")):
+        button = cal.findChild(QToolButton, name)
+        if button is not None:
+            button.setIcon(icons.icon(icon, ui.text, 16, 2.4))
+            button.setIconSize(QSize(16, 16))
+    return cal
 
 
 def _paint_chevron(widget: QWidget) -> None:
     """The drop-down arrow, which the dialog style sheet would otherwise hide."""
     p = QPainter(widget)
-    icons.paint(p, "chevron_down", QRectF(widget.width() - 26, (widget.height() - 14) / 2, 14, 14), "#636366", 2.2)
+    icons.paint(p, "chevron_down", QRectF(widget.width() - 26, (widget.height() - 14) / 2, 14, 14),
+                theme.ui().icon, 2.2)
 
 
 class ComboBox(QComboBox):
@@ -1180,14 +1241,15 @@ class DateTimeEdit(QDateTimeEdit):
 
 
 class Dialog(QDialog):
-    """A small white dialog that stays above the notes, with Cancel and a main button at the bottom."""
+    """A small dialog, light or dark like the rest of the app, that stays above the notes, with Cancel and
+    a main button at the bottom."""
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setStyleSheet(DIALOG_QSS)
+        self.setStyleSheet(dialog_qss())
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(20, 18, 20, 16)
         self.lay.setSpacing(8)
@@ -1203,8 +1265,8 @@ class Dialog(QDialog):
         self.lay.addSpacing(8)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancel = PillButton("Cancel", theme.HUB_ACCENT)
-        ok = PillButton(ok_text, theme.HUB_ACCENT, primary=True)
+        cancel = PillButton("Cancel", theme.ui().accent)
+        ok = PillButton(ok_text, theme.ui().accent, primary=True)
         cancel.clicked.connect(self.reject)
         ok.clicked.connect(self.accept)
         ok.setDefault(True)
@@ -1261,6 +1323,7 @@ class ReminderDialog(Dialog):
         self.when_title = self.heading("Remind me at")
         self.edit = DateTimeEdit(initial)
         self.edit.setCalendarPopup(True)
+        self.edit.setCalendarWidget(calendar())
         self.edit.setDisplayFormat("ddd d MMM yyyy   h:mm AP")
         self.edit.setFont(theme.font(10.5))
         self.lay.addWidget(self.edit)
@@ -1379,12 +1442,13 @@ class Segmented(QWidget):
             b.clicked.connect(lambda _=False, k=key: self.set_current(k, emit=True))
             lay.addWidget(b)
             self.buttons[key] = b
+        ui, css = theme.ui(), theme.rgba
         self.setStyleSheet(f"""
-            QWidget#segmented {{ background: rgba(118, 118, 128, 30); border-radius: 9px; }}
+            QWidget#segmented {{ background: {css(ui.track)}; border-radius: 9px; }}
             QPushButton {{ background: transparent; border: none; border-radius: 7px;
-                           padding: 5px 14px; color: {theme.HUB_TEXT}; }}
-            QPushButton:hover:!checked {{ background: rgba(0, 0, 0, 10); }}
-            QPushButton:checked {{ background: #FFFFFF; border: 1px solid rgba(0, 0, 0, 14); }}
+                           padding: 5px 14px; color: {ui.text}; }}
+            QPushButton:hover:!checked {{ background: {css(ui.line)}; }}
+            QPushButton:checked {{ background: {ui.thumb}; border: 1px solid {css(ui.line)}; }}
         """)
         self.current = ""
         self.set_current(current)
