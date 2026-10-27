@@ -165,6 +165,8 @@ _DEFS = {
     "more": lambda: (None, _dots((5.5, 12), (12, 12), (18.5, 12), r=1.7)),
     "chevron_up": lambda: (_lines([(6, 14.5), (12, 8.5), (18, 14.5)]), None),
     "chevron_down": lambda: (_lines([(6, 9.5), (12, 15.5), (18, 9.5)]), None),
+    "chevron_left": lambda: (_lines([(14.5, 6), (8.5, 12), (14.5, 18)]), None),
+    "chevron_right": lambda: (_lines([(9.5, 6), (15.5, 12), (9.5, 18)]), None),
     "bell": lambda: (_bell(), None),
     "clock": lambda: (_clock(), None),
     "repeat": lambda: (_repeat(), None),

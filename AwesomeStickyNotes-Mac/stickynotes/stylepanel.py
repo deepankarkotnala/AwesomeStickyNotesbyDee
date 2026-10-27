@@ -12,31 +12,36 @@ from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEd
 from . import decor, icons, theme
 from .colorpicker import pick_color
 from .store import Note
-from .widgets import (DIALOG_QSS, ComboBox, CustomSwatch, PillButton, SaturationSlider, Segmented, Swatch,
-                      check_shape, make_menu)
+from .widgets import (ComboBox, CustomSwatch, PillButton, SaturationSlider, Segmented, Swatch, check_shape,
+                      dialog_qss, make_menu)
 
-RING = QColor("#3A3A3C")
-SUB = QColor(60, 60, 67, 150)
 
-PANEL_QSS = DIALOG_QSS + f"""
-    QWidget#panel {{ background: #FFFFFF; }}
+def panel_qss() -> str:
+    ui, css = theme.ui(), theme.rgba
+    return dialog_qss() + f"""
+    QWidget#panel {{ background: {ui.surface}; }}
     QScrollArea, QWidget#content {{ background: transparent; border: none; }}
-    QFrame#rule {{ background: rgba(0, 0, 0, 16); border: none; }}
+    QFrame#rule {{ background: {css(ui.line)}; border: none; }}
     QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px 0; }}
-    QScrollBar::handle:vertical {{ background: rgba(0, 0, 0, 40); border-radius: 4px; min-height: 30px; margin: 0 2px; }}
-    QScrollBar::handle:vertical:hover {{ background: rgba(0, 0, 0, 70); }}
+    QScrollBar::handle:vertical {{ background: {css(ui.scroll)}; border-radius: 4px; min-height: 30px; margin: 0 2px; }}
+    QScrollBar::handle:vertical:hover {{ background: {css(ui.scroll_hover)}; }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
     QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
-    QPushButton#emoji {{ background: #F2F2F7; border: none; border-radius: 8px; padding: 4px 12px;
-                         color: {theme.HUB_TEXT}; }}
-    QPushButton#emoji:hover {{ background: #E5E5EA; }}
-"""
+    QPushButton#emoji {{ background: {ui.field}; border: none; border-radius: 8px; padding: 4px 12px;
+                         color: {ui.text}; }}
+    QPushButton#emoji:hover {{ background: {ui.field_hover}; }}
+    """
 
 
-def _label(text: str, pt: float = 10, weight=QFont.Weight.Normal, color: QColor | str = theme.HUB_TEXT) -> QLabel:
+def ring() -> QColor:
+    """The ring around the selected colour swatch."""
+    return QColor(theme.ui().text)
+
+
+def _label(text: str, pt: float = 10, weight=QFont.Weight.Normal, color: QColor | str | None = None) -> QLabel:
     lbl = QLabel(text)
     lbl.setFont(theme.font(pt, weight))
-    lbl.setStyleSheet(f"color: {theme.rgba(color)};")
+    lbl.setStyleSheet(f"color: {theme.rgba(color or theme.ui().text)};")
     return lbl
 
 
@@ -107,7 +112,7 @@ class StylePanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setObjectName("panel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        self.setStyleSheet(PANEL_QSS)
+        self.setStyleSheet(panel_qss())
         first = notes[0]
         self.setWindowTitle(f"Customise “{first.title}”" if len(notes) == 1 else f"Customise {len(notes)} notes")
         self.setWindowIcon(ctl.icon)
@@ -123,7 +128,7 @@ class StylePanel(QWidget):
         heading.setSpacing(4)
         heading.addWidget(_label("Customise look", 15, QFont.Weight.DemiBold))
         what = f"“{first.title}”" if len(notes) == 1 else f"{len(notes)} notes"
-        sub = _label(f"Changes apply to {what} as you make them.", 9.5, color=SUB)
+        sub = _label(f"Changes apply to {what} as you make them.", 9.5, color=theme.ui().sub)
         sub.setWordWrap(True)
         heading.addWidget(sub)
         heading.addStretch(1)
@@ -154,17 +159,17 @@ class StylePanel(QWidget):
         foot = QHBoxLayout()
         foot.setContentsMargins(22, 12, 22, 14)
         foot.setSpacing(8)
-        copy = PillButton("Copy style", theme.HUB_ACCENT)
+        copy = PillButton("Copy style", theme.ui().accent)
         copy.setToolTip("Copy this look, then click “Paste style” on any note")
         copy.clicked.connect(lambda: (self.ctl.copy_style(self.notes[0]), self.close()))
-        paste = PillButton("Paste style", theme.HUB_ACCENT)
+        paste = PillButton("Paste style", theme.ui().accent)
         paste.setEnabled(ctl.copied_style is not None)
         paste.setToolTip("Give these notes the look you copied")
         paste.clicked.connect(self._paste)
-        everyone = PillButton("Apply to all notes", theme.HUB_ACCENT)
+        everyone = PillButton("Apply to all notes", theme.ui().accent)
         everyone.setToolTip("Give every note this look")
         everyone.clicked.connect(lambda: self.ctl.apply_to_all(self.notes[0]))
-        done = PillButton("Done", theme.HUB_ACCENT, primary=True)
+        done = PillButton("Done", theme.ui().accent, primary=True)
         done.clicked.connect(self.close)
         for b in (copy, paste, everyone):
             foot.addWidget(b)
@@ -176,7 +181,7 @@ class StylePanel(QWidget):
     # ------------------------------------------------------------------ building blocks
     def _section(self, title: str) -> None:
         row = self.form.rowCount()
-        lbl = _label(title.upper(), 8, QFont.Weight.Bold, SUB)
+        lbl = _label(title.upper(), 8, QFont.Weight.Bold, theme.ui().sub)
         f = lbl.font()
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.7)
         lbl.setFont(f)
@@ -210,8 +215,8 @@ class StylePanel(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(2)
         dots = list(extra)
-        swatches = [Swatch(pal, pal.key == current, RING) for pal in theme.PALETTES.values()]
-        custom = CustomSwatch(current, RING)
+        swatches = [Swatch(pal, pal.key == current, ring()) for pal in theme.PALETTES.values()]
+        custom = CustomSwatch(current, ring())
 
         def pick(key: str) -> None:
             for sw in swatches:
@@ -262,7 +267,7 @@ class StylePanel(QWidget):
         self._section("Card")
         self._segments("Style", theme.STYLES, n.style, "style")
         self._segments("Paper", theme.BACKGROUNDS, n.background, "background")
-        auto = PillButton("Auto", theme.HUB_ACCENT, small=True)
+        auto = PillButton("Auto", theme.ui().accent, small=True)
         auto.setToolTip("A deeper shade of the note's own colour")
         auto.clicked.connect(lambda: self._set(color2=""))
         self.gradient_row = self._row("Gradient to", self._swatches(
@@ -301,17 +306,17 @@ class StylePanel(QWidget):
                 box.addWidget(self.size_label)
         box.addStretch(1)
         self._row("Size", box)
-        auto = PillButton("Auto", theme.HUB_ACCENT, small=True)
+        auto = PillButton("Auto", theme.ui().accent, small=True)
         auto.setToolTip("Dark or light text, whichever reads best on the colour")
         auto.clicked.connect(lambda: self._set(text_color=""))
         inks = QHBoxLayout()
         inks.setSpacing(2)
         inks.addWidget(auto)
         for code, name in theme.INKS:
-            sw = Swatch(theme.Palette(code, name, code, code, code), n.text_color.upper() == code, RING)
+            sw = Swatch(theme.Palette(code, name, code, code, code), n.text_color.upper() == code, ring())
             sw.clicked.connect(lambda _=False, c=code: self._set(text_color=c))
             inks.addWidget(sw)
-        custom = CustomSwatch(n.text_color if n.text_color not in dict(theme.INKS) else "", RING)
+        custom = CustomSwatch(n.text_color if n.text_color not in dict(theme.INKS) else "", ring())
         custom.setToolTip("Any text colour…")
         custom.clicked.connect(lambda: self._custom_into("text_color"))
         inks.addWidget(custom)
@@ -376,7 +381,7 @@ class StylePanel(QWidget):
         self.emoji_btn.setFont(theme.font(14 if emoji else 10))
 
     def _emoji_menu(self) -> None:
-        menu = make_menu(self)
+        menu = make_menu(self, theme.ui().dark)
         holder = QWidget()
         lay = QVBoxLayout(holder)
         lay.setContentsMargins(8, 6, 8, 6)
@@ -395,18 +400,20 @@ class StylePanel(QWidget):
             b.setFont(theme.font(14))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setStyleSheet("QPushButton { background: transparent; border: none; border-radius: 8px; }"
-                            "QPushButton:hover { background: rgba(0, 0, 0, 14); }")
+                            f"QPushButton:hover {{ background: {theme.rgba(theme.ui().line)}; }}")
             b.clicked.connect(lambda _=False, e=emoji: pick(e))
             grid.addWidget(b, i // 8, i % 8)
         lay.addLayout(grid)
         own = QLineEdit()
         own.setPlaceholderText("Or type any emoji (Win + .) and press Enter")
         own.setFont(theme.font(9.5))
-        own.setStyleSheet("QLineEdit { background: #F2F2F7; border: none; border-radius: 7px; padding: 6px 8px; }")
+        ui = theme.ui()
+        own.setStyleSheet(f"QLineEdit {{ background: {ui.field}; color: {ui.text}; border: none; border-radius: 7px; "
+                          f"padding: 6px 8px; selection-background-color: {ui.accent}; }}")
         own.setMaxLength(8)
         own.returnPressed.connect(lambda: pick(own.text().strip()))
         lay.addWidget(own)
-        clear = PillButton("No emoji", theme.HUB_ACCENT, small=True)
+        clear = PillButton("No emoji", theme.ui().accent, small=True)
         clear.clicked.connect(lambda: pick(""))
         row = QHBoxLayout()
         row.addWidget(clear)

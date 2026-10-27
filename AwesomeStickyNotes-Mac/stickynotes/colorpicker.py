@@ -195,11 +195,6 @@ class ColorDialog(Dialog):
         self.hex.setMaxLength(7)
         self.hex.setPlaceholderText("#RRGGBB")
         self.hex.setValidator(QRegularExpressionValidator(QRegularExpression("#?[0-9A-Fa-f]{0,6}"), self.hex))
-        self.hex.setStyleSheet(f"""
-            QLineEdit {{ background: #F2F2F7; border: 1px solid transparent; border-radius: 8px;
-                         padding: 6px 10px; color: {theme.HUB_TEXT}; selection-background-color: {theme.HUB_ACCENT}; }}
-            QLineEdit:focus {{ border: 1px solid {theme.HUB_ACCENT}; }}
-        """)
         self.hex.textEdited.connect(self._typed)
         self.hex.editingFinished.connect(self._typed_done)
         side.addWidget(self.hex)

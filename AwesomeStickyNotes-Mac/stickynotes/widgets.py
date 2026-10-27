@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation,
+from PySide6.QtCore import (QDate, QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation,
                             Signal)
-from PySide6.QtGui import (QColor, QConicalGradient, QFont, QFontMetrics, QLinearGradient, QPainter,
-                           QPainterPath, QPen, QTextLayout, QTextOption)
-from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QDateTimeEdit, QDialog,
-                               QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
-                               QSizePolicy, QSpinBox, QVBoxLayout, QWidget, QWidgetAction)
+from PySide6.QtGui import (QColor, QConicalGradient, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath,
+                           QPalette, QPen, QTextCharFormat, QTextLayout, QTextOption)
+from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QCalendarWidget, QComboBox,
+                               QDateTimeEdit, QDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout, QLineEdit,
+                               QMenu, QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+                               QWidgetAction)
 
 from . import icons, repeat, system, theme
 from .store import Task
@@ -51,7 +52,7 @@ class IconButton(QAbstractButton):
         super().__init__(parent)
         self.name, self.color = name, QColor(color)
         self.icon_px = icon_size
-        self.hover_bg = hover_bg or QColor(0, 0, 0, 16)
+        self.hover_bg = hover_bg or (QColor(255, 255, 255, 26) if theme.ui().dark else QColor(0, 0, 0, 16))
         self._hover = False
         self._opacity = 1.0
         self._fade = animation(self, 140, self._set_opacity)
@@ -181,15 +182,24 @@ class CheckCircle(QAbstractButton):
 
 
 class Pill(QAbstractButton):
-    """Small rounded label, optionally with an icon - used for reminder times and 'since' badges."""
+    """Small rounded label, optionally with an icon - used for reminder times and 'since' badges.
+    Given less room than its text needs, it shortens the text with an ellipsis."""
 
     def __init__(self, text: str, fg: QColor, bg: QColor, icon: str | None = None, parent=None):
         super().__init__(parent)
         self.setText(text)
         self.fg, self.bg, self.icon_name = QColor(fg), QColor(bg), icon
         self.setFont(theme.font(8.2, QFont.Weight.DemiBold))
-        fm = QFontMetrics(self.font())
-        self.setFixedSize(fm.horizontalAdvance(text) + (30 if icon else 16), 20)
+        self.pad = 30 if icon else 16
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(20)
+        self.resize(self.sizeHint())
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.fontMetrics().horizontalAdvance(self.text()) + self.pad, 20)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(min(self.sizeHint().width(), self.pad + self.fontMetrics().horizontalAdvance("00:00…")), 20)
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -203,13 +213,88 @@ class Pill(QAbstractButton):
             x = 22
         p.setPen(self.fg)
         p.setFont(self.font())
-        p.drawText(QRectF(x, 0, self.width() - x - 8, self.height()), Qt.AlignmentFlag.AlignVCenter, self.text())
+        width = self.width() - x - 8
+        text = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, width + 1)
+        p.drawText(QRectF(x, 0, width, self.height()), Qt.AlignmentFlag.AlignVCenter, text)
+
+
+class FlowLayout(QLayout):
+    """Lays widgets out left to right and wraps them onto further lines when the width runs out, so a row
+    of pills never makes its parent wider. A widget wider than a whole line gets the line's width."""
+
+    def __init__(self, parent=None, spacing: int = 6):
+        super().__init__(parent)
+        self._items = []
+        self.setSpacing(spacing)
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._place(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._place(rect, apply=True)
+
+    def sizeHint(self) -> QSize:  # everything on one line
+        items = [i for i in self._items if not i.isEmpty()]
+        m = self.contentsMargins()
+        width = sum(i.sizeHint().width() for i in items) + self.spacing() * max(0, len(items) - 1)
+        height = max((i.sizeHint().height() for i in items), default=0)
+        return QSize(width + m.left() + m.right(), height + m.top() + m.bottom())
+
+    def minimumSize(self) -> QSize:
+        size = QSize(0, 0)
+        for item in self._items:
+            if not item.isEmpty():
+                size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _place(self, rect: QRect, apply: bool) -> int:
+        """Lay the items out in `rect` (or only measure, if not `apply`); returns the height used."""
+        m = self.contentsMargins()
+        area = rect.marginsRemoved(m)
+        gap = self.spacing()
+        x, y, line_height = area.x(), area.y(), 0
+        for item in self._items:
+            if item.isEmpty():
+                continue
+            hint = item.sizeHint()
+            width = max(item.minimumSize().width(), min(hint.width(), area.width()))
+            if x > area.x() and x + width > area.x() + area.width():
+                x, y, line_height = area.x(), y + line_height + gap, 0
+            if apply:
+                item.setGeometry(QRect(x, y, width, hint.height()))
+            x += width + gap
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + m.bottom()
 
 
 class PillButton(QPushButton):
-    def __init__(self, text: str, accent: str, primary: bool = False, dark: bool = False, small: bool = False,
+    """A rounded button: filled with `accent` when primary, else a soft grey that suits a light or dark
+    background (`dark`; by default the app's own light or dark windows)."""
+
+    def __init__(self, text: str, accent: str, primary: bool = False, dark: bool | None = None, small: bool = False,
                  parent=None):
         super().__init__(text, parent)
+        dark = theme.ui().dark if dark is None else dark
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFont(theme.font(8.4 if small else 9, QFont.Weight.DemiBold))
         shape = "border-radius: 11px; padding: 0 9px;" if small else "border-radius: 8px; padding: 6px 12px;"
@@ -357,32 +442,28 @@ class InlineEdit(QLineEdit):
 
 
 class RowActions(QWidget):
-    """Small button strip that fades the text underneath into the row's hover colour."""
+    """A task row's strip of hover buttons. The row's text wraps around it, so it never covers any text."""
 
-    def __init__(self, bg: QColor, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.bg = bg
         self.lay = QHBoxLayout(self)
-        self.lay.setContentsMargins(18, 0, 0, 0)
+        self.lay.setContentsMargins(0, 0, 0, 0)
         self.lay.setSpacing(0)
 
     def add(self, *buttons: QWidget) -> None:
         for b in buttons:
             self.lay.addWidget(b)
 
-    def paintEvent(self, e):
-        p = QPainter(self)
-        clear = QColor(self.bg)
-        clear.setAlpha(0)
-        fade = QLinearGradient(0, 0, 18, 0)
-        fade.setColorAt(0, clear)
-        fade.setColorAt(1, self.bg)
-        p.fillRect(QRectF(0, 0, 18, self.height()), fade)
-        p.fillRect(QRectF(18, 0, self.width() - 18, self.height()), self.bg)
+
+ROOMY_LINE = 120   # px: narrowest first line worth keeping beside a task's full set of hover buttons
 
 
 class TaskText(QWidget):
-    """Word-wrapped task text that can draw an animated strike-through, line by line."""
+    """Word-wrapped task text that can draw an animated strike-through, line by line.
+
+    The top right corner is kept free for the row's hover buttons (`keep_clear`): lines beside them are
+    shorter, like text flowing around a picture. Where that would squeeze the first line too much, the
+    row shows a single "more" button instead and only its width is kept free."""
 
     def __init__(self, text: str, font: QFont, color: QColor, done_color: QColor, done: bool, parent=None,
                  strike: bool = True):
@@ -392,6 +473,7 @@ class TaskText(QWidget):
         self._font = QFont(font)
         self._strike_pos = QFontMetrics(self._font).strikeOutPos()
         self._cache: tuple[int, QTextLayout, int] | None = None
+        self.keep_clear = (0, 0, 0)   # height of the button band, width for all buttons, width for "more"
         self._t = 1.0 if done else 0.0
         self._anim = animation(self, STRIKE_MS, self._set_t)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -409,10 +491,16 @@ class TaskText(QWidget):
         self._t = float(v)
         self.update()
 
+    def roomy(self, width: int) -> bool:
+        """True if the full set of buttons fits beside the text at this width (else just "more")."""
+        return width - self.keep_clear[1] >= ROOMY_LINE
+
     def _layout(self, width: int) -> tuple[QTextLayout, int]:
         width = max(width, 20)
         if self._cache and self._cache[0] == width:
             return self._cache[1], self._cache[2]
+        band, full, compact = self.keep_clear
+        beside = full if self.roomy(width) else compact
         layout = QTextLayout(self._text, self._font)
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
@@ -423,7 +511,8 @@ class TaskText(QWidget):
             line = layout.createLine()
             if not line.isValid():
                 break
-            line.setLineWidth(width)
+            # A few px of overlap is fine: the buttons' icons are smaller than their hover backgrounds.
+            line.setLineWidth(max(20, width - beside) if y < band - 4 else width)
             line.setPosition(QPointF(0, y))
             y += line.height()
         layout.endLayout()
@@ -509,8 +598,9 @@ class TaskRow(QWidget):
         check_col.addStretch(1)
         lay.addLayout(check_col)
 
+        text_top = pad + max(0, (self.check.height() - line) // 2)
         self.col = QVBoxLayout()
-        self.col.setContentsMargins(0, max(0, (self.check.height() - line) // 2), 0, 0)
+        self.col.setContentsMargins(0, text_top - pad, 0, 0)
         self.col.setSpacing(4)
         self.label = TaskText(task.text, self.text_font, pal.text, pal.ink(0.38), done, strike=strike)
         self.col.addWidget(self.label)
@@ -525,34 +615,43 @@ class TaskRow(QWidget):
             text = f"{friendly(when)}  ·  {repeat.short(task.repeat)}" if task.repeat else friendly(when)
             chip = Pill(text, fg, bg, "repeat" if task.repeat else "bell")
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
-            chip.setToolTip("Change reminder")
+            chip.setToolTip(f"{text}\nClick to change the reminder")   # the chip may be too narrow for it all
             chip.clicked.connect(lambda: self.remind.emit(self.task, chip))
             meta.append(chip)
         if since:
             meta.append(Pill(since, pal.sub, pal.wash(0.06)))
         if meta:
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 1)
-            row.setSpacing(6)
+            pills = FlowLayout(spacing=6)
+            pills.setContentsMargins(0, 0, 0, 1)
             for w in meta:
-                row.addWidget(w)
-            row.addStretch(1)
-            self.col.addLayout(row)
+                pills.addWidget(w)
+            self.col.addLayout(pills)
         lay.addLayout(self.col, 1)
 
-        # Hover actions float over the end of the row so the text can use the full width.
-        self.actions = RowActions(self._hover_color(), self)
+        # Hover buttons in the top right corner, centred on the first line; the text wraps around them.
+        # On a narrow card a single "more" button stands in for them, so the text keeps more room.
+        self.full = RowActions(self)
         if not done:
             self.btn_pin = IconButton("pin", pal.accent if task.pinned else pal.sub, 24, 14,
                                       "Unpin" if task.pinned else "Pin to top", pal.wash(0.07))
             self.btn_pin.clicked.connect(lambda: self.pin_toggled.emit(self.task))
-            self.actions.add(self.btn_pin)
+            self.full.add(self.btn_pin)
         self.btn_bell = IconButton("bell", pal.sub, 24, 14, "Remind me", pal.wash(0.07))
         self.btn_bell.clicked.connect(lambda: self.remind.emit(self.task, self.btn_bell))
         self.btn_del = IconButton("x", pal.sub, 24, 14, "Delete task", pal.wash(0.07))
         self.btn_del.clicked.connect(lambda: self.deleted.emit(self.task))
-        self.actions.add(self.btn_bell, self.btn_del)
-        self.actions.hide()
+        self.full.add(self.btn_bell, self.btn_del)
+        self.compact = RowActions(self)
+        self.btn_more = IconButton("more", pal.sub, 24, 14, "Pin, remind or delete", pal.wash(0.07))
+        self.btn_more.clicked.connect(self._more_menu)
+        self.compact.add(self.btn_more)
+        for strip in (self.full, self.compact):
+            strip.adjustSize()
+            strip.hide()
+        self.actions = self.full                 # the strip in use at the row's current width
+        self._actions_y = max(1, text_top + (line - 24) // 2)
+        # The strips end 4px from the row's edge, the text 8px: keep a 6px gap between them.
+        self.label.keep_clear = (self._actions_y + 24 - text_top, self.full.width() + 2, self.compact.width() + 2)
         self._motion: QVariantAnimation | None = None
 
     # enter / exit animations: grow or shrink the row's height while fading it
@@ -598,8 +697,23 @@ class TaskRow(QWidget):
         return mix(QColor(self.pal.bg), overlay, 0.045)
 
     def resizeEvent(self, e):
-        self.actions.adjustSize()
-        self.actions.move(self.width() - self.actions.width() - 4, 3)
+        # The row's layout has already sized the text, so its width says which strip the text left room for.
+        actions = self.full if self.label.roomy(self.label.width()) else self.compact
+        if actions is not self.actions:
+            shown = self.actions.isVisible()
+            self.actions.hide()
+            self.actions = actions
+            actions.setVisible(shown)
+        actions.move(self.width() - actions.width() - 4, self._actions_y)
+
+    def _more_menu(self) -> None:
+        menu = make_menu(self, self.pal.dark)
+        if not self.done:
+            add_action(menu, "Unpin" if self.task.pinned else "Pin to top",
+                       lambda: self.pin_toggled.emit(self.task), icon="pin")
+        add_action(menu, "Remind me…", lambda: self.remind.emit(self.task, self.btn_more), icon="bell")
+        add_action(menu, "Delete task", lambda: self.deleted.emit(self.task), icon="x", danger=True)
+        menu.exec(self.btn_more.mapToGlobal(QPoint(0, self.btn_more.height() + 2)))
 
     def set_done_visual(self, done: bool, animated: bool = True) -> None:
         self.done = done
@@ -1143,28 +1257,85 @@ def reminder_presets(ref: datetime | None = None) -> list[tuple[str, datetime]]:
 
 
 # ------------------------------------------------------------------ dialogs
-DIALOG_QSS = f"""
-    QDialog {{ background: #FFFFFF; }}
-    QLabel {{ color: {theme.HUB_TEXT}; }}
-    QDateTimeEdit, QComboBox, QSpinBox {{
-        background: #F2F2F7; border: 1px solid transparent; border-radius: 8px;
-        padding: 7px 10px; color: {theme.HUB_TEXT};
+def dialog_qss() -> str:
+    """Dialogs, fields and drop-down lists in the app's light or dark colours."""
+    ui, css = theme.ui(), theme.rgba
+    return f"""
+    QDialog {{ background: {ui.surface}; }}
+    QLabel {{ color: {ui.text}; }}
+    QDateTimeEdit, QComboBox, QSpinBox, QLineEdit {{
+        background: {ui.field}; border: 1px solid transparent; border-radius: 8px;
+        padding: 7px 10px; color: {ui.text}; selection-background-color: {ui.accent}; selection-color: #FFFFFF;
     }}
-    QDateTimeEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 1px solid {theme.HUB_ACCENT}; }}
+    QDateTimeEdit:focus, QComboBox:focus, QSpinBox:focus, QLineEdit:focus {{ border: 1px solid {ui.accent}; }}
     QDateTimeEdit::drop-down, QComboBox::drop-down {{ border: none; width: 22px; }}
     QComboBox QAbstractItemView {{
-        background: #FFFFFF; color: {theme.HUB_TEXT}; border: 1px solid rgba(0, 0, 0, 28); outline: none;
-        selection-background-color: {theme.HUB_ACCENT}; selection-color: #FFFFFF; padding: 4px;
+        background: {ui.surface}; color: {ui.text}; border: 1px solid {css(ui.line)}; outline: none;
+        selection-background-color: {ui.accent}; selection-color: #FFFFFF; padding: 4px;
     }}
-    QPushButton#step {{ background: #F2F2F7; color: {theme.HUB_TEXT}; border: none; border-radius: 8px; }}
-    QPushButton#step:hover {{ background: #E5E5EA; }}
-"""
+    QPushButton#step {{ background: {ui.field}; color: {ui.text}; border: none; border-radius: 8px; }}
+    QPushButton#step:hover {{ background: {ui.field_hover}; }}
+    """
+
+
+def calendar() -> QCalendarWidget:
+    """The month that drops down from a date field, readable in the app's light and dark colours: no red
+    weekends, today in the accent colour, other months' days greyed."""
+    ui, css = theme.ui(), theme.rgba
+    cal = QCalendarWidget()
+    cal.setGridVisible(False)
+    cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+    cal.setHorizontalHeaderFormat(QCalendarWidget.HorizontalHeaderFormat.ShortDayNames)
+    pal = cal.palette()
+    for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive, QPalette.ColorGroup.Disabled):
+        for role, color in ((QPalette.ColorRole.Window, ui.surface), (QPalette.ColorRole.Base, ui.surface),
+                            (QPalette.ColorRole.AlternateBase, ui.surface), (QPalette.ColorRole.Button, ui.surface),
+                            (QPalette.ColorRole.WindowText, ui.text), (QPalette.ColorRole.Text, ui.text),
+                            (QPalette.ColorRole.ButtonText, ui.text), (QPalette.ColorRole.Highlight, ui.accent),
+                            (QPalette.ColorRole.HighlightedText, "#FFFFFF")):
+            pal.setColor(group, role, QColor(color))
+    faded = QColor(ui.sub)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, faded)   # days of the months either side
+    cal.setPalette(pal)
+    plain = QTextCharFormat()
+    plain.setForeground(QColor(ui.text))
+    for day in (Qt.DayOfWeek.Saturday, Qt.DayOfWeek.Sunday):
+        cal.setWeekdayTextFormat(day, plain)
+    header = QTextCharFormat()
+    header.setForeground(faded)
+    header.setFontWeight(QFont.Weight.DemiBold)
+    cal.setHeaderTextFormat(header)
+    today = QTextCharFormat()
+    today.setForeground(QColor(ui.accent))
+    today.setFontWeight(QFont.Weight.Bold)
+    cal.setDateTextFormat(QDate.currentDate(), today)
+    cal.setStyleSheet(f"""
+        QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: {ui.surface};
+            border-bottom: 1px solid {css(ui.line)}; }}
+        QCalendarWidget QToolButton {{ color: {ui.text}; background: transparent; border: none; border-radius: 7px;
+            padding: 5px 8px; font-weight: 600; }}
+        QCalendarWidget QToolButton:hover {{ background: {ui.field}; }}
+        QCalendarWidget QToolButton::menu-indicator {{ image: none; width: 0; }}
+        QCalendarWidget QMenu {{ background: {ui.surface}; color: {ui.text}; border: 1px solid {css(ui.line)}; }}
+        QCalendarWidget QMenu::item:selected {{ background: {ui.accent}; color: #FFFFFF; }}
+        QCalendarWidget QSpinBox {{ background: {ui.field}; color: {ui.text}; border: none; border-radius: 6px;
+            padding: 2px 6px; selection-background-color: {ui.accent}; selection-color: #FFFFFF; }}
+        QCalendarWidget QAbstractItemView {{ background: {ui.surface}; color: {ui.text}; outline: none; border: none;
+            selection-background-color: {ui.accent}; selection-color: #FFFFFF; }}
+    """)
+    for name, icon in (("qt_calendar_prevmonth", "chevron_left"), ("qt_calendar_nextmonth", "chevron_right")):
+        button = cal.findChild(QToolButton, name)
+        if button is not None:
+            button.setIcon(icons.icon(icon, ui.text, 16, 2.4))
+            button.setIconSize(QSize(16, 16))
+    return cal
 
 
 def _paint_chevron(widget: QWidget) -> None:
     """The drop-down arrow, which the dialog style sheet would otherwise hide."""
     p = QPainter(widget)
-    icons.paint(p, "chevron_down", QRectF(widget.width() - 26, (widget.height() - 14) / 2, 14, 14), "#636366", 2.2)
+    icons.paint(p, "chevron_down", QRectF(widget.width() - 26, (widget.height() - 14) / 2, 14, 14),
+                theme.ui().icon, 2.2)
 
 
 class ComboBox(QComboBox):
@@ -1180,14 +1351,15 @@ class DateTimeEdit(QDateTimeEdit):
 
 
 class Dialog(QDialog):
-    """A small white dialog that stays above the notes, with Cancel and a main button at the bottom."""
+    """A small dialog, light or dark like the rest of the app, that stays above the notes, with Cancel and
+    a main button at the bottom."""
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setStyleSheet(DIALOG_QSS)
+        self.setStyleSheet(dialog_qss())
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(20, 18, 20, 16)
         self.lay.setSpacing(8)
@@ -1203,8 +1375,8 @@ class Dialog(QDialog):
         self.lay.addSpacing(8)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancel = PillButton("Cancel", theme.HUB_ACCENT)
-        ok = PillButton(ok_text, theme.HUB_ACCENT, primary=True)
+        cancel = PillButton("Cancel", theme.ui().accent)
+        ok = PillButton(ok_text, theme.ui().accent, primary=True)
         cancel.clicked.connect(self.reject)
         ok.clicked.connect(self.accept)
         ok.setDefault(True)
@@ -1261,6 +1433,7 @@ class ReminderDialog(Dialog):
         self.when_title = self.heading("Remind me at")
         self.edit = DateTimeEdit(initial)
         self.edit.setCalendarPopup(True)
+        self.edit.setCalendarWidget(calendar())
         self.edit.setDisplayFormat("ddd d MMM yyyy   h:mm AP")
         self.edit.setFont(theme.font(10.5))
         self.lay.addWidget(self.edit)
@@ -1379,12 +1552,13 @@ class Segmented(QWidget):
             b.clicked.connect(lambda _=False, k=key: self.set_current(k, emit=True))
             lay.addWidget(b)
             self.buttons[key] = b
+        ui, css = theme.ui(), theme.rgba
         self.setStyleSheet(f"""
-            QWidget#segmented {{ background: rgba(118, 118, 128, 30); border-radius: 9px; }}
+            QWidget#segmented {{ background: {css(ui.track)}; border-radius: 9px; }}
             QPushButton {{ background: transparent; border: none; border-radius: 7px;
-                           padding: 5px 14px; color: {theme.HUB_TEXT}; }}
-            QPushButton:hover:!checked {{ background: rgba(0, 0, 0, 10); }}
-            QPushButton:checked {{ background: #FFFFFF; border: 1px solid rgba(0, 0, 0, 14); }}
+                           padding: 5px 14px; color: {ui.text}; }}
+            QPushButton:hover:!checked {{ background: {css(ui.line)}; }}
+            QPushButton:checked {{ background: {ui.thumb}; border: 1px solid {css(ui.line)}; }}
         """)
         self.current = ""
         self.set_current(current)

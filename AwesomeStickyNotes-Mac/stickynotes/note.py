@@ -989,7 +989,8 @@ class NoteWindow(QWidget):
                           "to the Recycle Bin?\nYou can restore it from there.",
                           QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes, self)
         box.button(QMessageBox.StandardButton.Yes).setText("Delete")
-        box.setStyleSheet("QMessageBox { background: #FFFFFF; } QLabel { color: #1C1C1E; }")
+        ui = theme.ui()
+        box.setStyleSheet(f"QMessageBox {{ background: {ui.surface}; }} QLabel {{ color: {ui.text}; }}")
         if box.exec() == QMessageBox.StandardButton.Yes:
             self._fade(self.windowOpacity(), 0.0, then=lambda: self.store.delete_note(self.note))
 

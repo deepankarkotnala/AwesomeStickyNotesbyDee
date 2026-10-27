@@ -302,6 +302,7 @@ class Settings:
     pin: str = "desktop"
     completed: str = "strike"
     style: str = "3d"               # card style for new notes
+    appearance: str = "system"      # the app's own windows: system (follow the OS) | light | dark
     radius: int = 16                # corner roundness of every note, in px
     recent_colors: str = ""         # custom colours used lately, newest first, comma-separated
 

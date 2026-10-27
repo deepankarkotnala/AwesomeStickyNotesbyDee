@@ -89,6 +89,9 @@ class Controller(QObject):
         self.layout_key = screens.current_key()   # the monitor arrangement note positions are saved under
         self.settling = False                     # monitors are changing: positions aren't the user's doing
 
+        # Light or dark for the app's own windows, as chosen in Settings or following the system.
+        self._apply_scheme()
+        QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: self.apply_appearance())
         self._build_tray()
         self.reminders = ReminderService(self)
         self.store.notes_changed.connect(self.sync_windows)
@@ -122,7 +125,13 @@ class Controller(QObject):
     def _build_tray(self) -> None:
         self.tray = QSystemTrayIcon(tray_icon(self.icon), self)
         self.tray.setToolTip(APP_NAME)
-        menu = self.tray_menu = make_menu()
+        self._build_tray_menu()
+        self.tray.activated.connect(self._tray_activated)
+        self.tray.show()
+
+    def _build_tray_menu(self) -> None:
+        old = getattr(self, "tray_menu", None)
+        menu = self.tray_menu = make_menu(dark=theme.ui().dark)
         add_action(menu, "New daily note", lambda: self.new_note("daily"), icon="plus")
         add_action(menu, "New checklist", lambda: self.new_note("checklist"), icon="note")
         menu.addSeparator()
@@ -137,8 +146,8 @@ class Controller(QObject):
         menu.addSeparator()
         add_action(menu, "Quit", self.quit, icon="x")
         self.tray.setContextMenu(menu)
-        self.tray.activated.connect(self._tray_activated)
-        self.tray.show()
+        if old is not None:
+            old.deleteLater()
 
     def _tray_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -235,6 +244,47 @@ class Controller(QObject):
         self.hub.activateWindow()
 
     # ------------------------------------------------------------------ settings
+    # ------------------------------------------------------------------ light / dark
+    def _apply_scheme(self) -> bool:
+        """Tell Qt which colour scheme to use and pick the app's matching colours; True if they changed."""
+        hints = QGuiApplication.styleHints()
+        mode = self.store.settings.appearance
+        if mode in ("light", "dark"):
+            scheme = Qt.ColorScheme.Dark if mode == "dark" else Qt.ColorScheme.Light
+            if hints.colorScheme() != scheme:
+                hints.setColorScheme(scheme)
+        else:
+            hints.unsetColorScheme()          # follow the system
+        # A chosen theme wins even where Qt can't switch its own controls; the app's own colours cover them.
+        dark = mode == "dark" if mode in ("light", "dark") else hints.colorScheme() == Qt.ColorScheme.Dark
+        changed = dark != theme.ui().dark
+        theme.set_dark(dark)
+        return changed
+
+    def apply_appearance(self) -> None:
+        """Re-colour the app's own windows (notes keep their own colours) after the setting or the system's
+        light/dark mode changed. Open windows are rebuilt in the new colours, where and as they were."""
+        if not self._apply_scheme():
+            return
+        self._build_tray_menu()
+        if self.hub is not None:
+            page, visible, geometry = self.hub.tabs.current, self.hub.isVisible(), self.hub.geometry()
+            self.hub.close()
+            self.hub.deleteLater()
+            self.hub = None
+            if visible:
+                self.open_hub(page)
+                self.hub.setGeometry(geometry)
+        if self.style_panel is not None:
+            notes, geometry = self.style_panel.notes, self.style_panel.geometry()
+            self.style_panel.close()
+            self.customise(notes)
+            self.style_panel.setGeometry(geometry)
+
+    def set_appearance(self, mode: str) -> None:
+        self.store.update_settings(appearance=mode)
+        QTimer.singleShot(0, self, self.apply_appearance)   # after the click that asked for it has finished
+
     def set_autostart(self, enabled: bool) -> None:
         try:
             system.set_autostart(enabled)

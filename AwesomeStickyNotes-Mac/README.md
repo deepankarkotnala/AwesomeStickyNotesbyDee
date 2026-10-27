@@ -29,6 +29,7 @@ From then on, double-click the app (or open it from Launchpad or Spotlight) and 
 | Any colour | **⋯** → Colour → the rainbow dot at the end of the colours. Pick by eye, type a code such as `#FFD1DC` (or `#FD1` for short), or reuse a recent colour. The note shows it while you pick |
 | Card style | **⋯** → Style: **Flat** (a plain card), **Elevated** (flat, lifted by a soft shadow) or **3D** (glossy with a deeper shadow). **Settings → Appearance** sets the style for new notes and can apply it to every note |
 | Corners | **Settings → Appearance → Corners**: Square, Soft, Round or Extra round, for every note |
+| Light or dark | **Settings → Appearance → Theme**: **System** (follows your computer's light or dark mode as it changes), **Light** or **Dark**, for the app's windows, dialogs, the calendar and menus. Notes keep their own colours |
 | Same look on every note | **⋯** → **Apply to all notes** → this colour, this style, these fonts & size, or the whole look |
 | Customise everything | **⋯** → **Customise look…**: colour, card style, paper (lined, grid, dotted or a two-colour gradient), header (plain, tinted or solid), an emoji before the title, title font, text font, size, text colour, line spacing, checkbox shape (circle, square or heart) and how done tasks look (struck through or faded). Changes show on the note straight away |
 | Paper look | **⋯** → Style → **Paper**: paper grain, nearly square corners and lifted ends, in any colour |
