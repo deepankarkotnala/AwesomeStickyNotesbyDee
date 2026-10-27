@@ -255,7 +255,8 @@ class Controller(QObject):
                 hints.setColorScheme(scheme)
         else:
             hints.unsetColorScheme()          # follow the system
-        dark = hints.colorScheme() == Qt.ColorScheme.Dark
+        # A chosen theme wins even where Qt can't switch its own controls; the app's own colours cover them.
+        dark = mode == "dark" if mode in ("light", "dark") else hints.colorScheme() == Qt.ColorScheme.Dark
         changed = dark != theme.ui().dark
         theme.set_dark(dark)
         return changed

@@ -8,8 +8,9 @@ from PySide6.QtCore import (QDate, QEasingCurve, QPoint, QPointF, QRect, QRectF,
 from PySide6.QtGui import (QColor, QConicalGradient, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath,
                            QPalette, QPen, QTextCharFormat, QTextLayout, QTextOption)
 from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QCalendarWidget, QComboBox,
-                               QDateTimeEdit, QDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QMenu,
-                               QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
+                               QDateTimeEdit, QDialog, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout, QLineEdit,
+                               QMenu, QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+                               QWidgetAction)
 
 from . import icons, repeat, system, theme
 from .store import Task
@@ -181,15 +182,24 @@ class CheckCircle(QAbstractButton):
 
 
 class Pill(QAbstractButton):
-    """Small rounded label, optionally with an icon - used for reminder times and 'since' badges."""
+    """Small rounded label, optionally with an icon - used for reminder times and 'since' badges.
+    Given less room than its text needs, it shortens the text with an ellipsis."""
 
     def __init__(self, text: str, fg: QColor, bg: QColor, icon: str | None = None, parent=None):
         super().__init__(parent)
         self.setText(text)
         self.fg, self.bg, self.icon_name = QColor(fg), QColor(bg), icon
         self.setFont(theme.font(8.2, QFont.Weight.DemiBold))
-        fm = QFontMetrics(self.font())
-        self.setFixedSize(fm.horizontalAdvance(text) + (30 if icon else 16), 20)
+        self.pad = 30 if icon else 16
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(20)
+        self.resize(self.sizeHint())
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.fontMetrics().horizontalAdvance(self.text()) + self.pad, 20)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(min(self.sizeHint().width(), self.pad + self.fontMetrics().horizontalAdvance("00:00…")), 20)
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -203,7 +213,78 @@ class Pill(QAbstractButton):
             x = 22
         p.setPen(self.fg)
         p.setFont(self.font())
-        p.drawText(QRectF(x, 0, self.width() - x - 8, self.height()), Qt.AlignmentFlag.AlignVCenter, self.text())
+        width = self.width() - x - 8
+        text = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, width + 1)
+        p.drawText(QRectF(x, 0, width, self.height()), Qt.AlignmentFlag.AlignVCenter, text)
+
+
+class FlowLayout(QLayout):
+    """Lays widgets out left to right and wraps them onto further lines when the width runs out, so a row
+    of pills never makes its parent wider. A widget wider than a whole line gets the line's width."""
+
+    def __init__(self, parent=None, spacing: int = 6):
+        super().__init__(parent)
+        self._items = []
+        self.setSpacing(spacing)
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._place(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._place(rect, apply=True)
+
+    def sizeHint(self) -> QSize:  # everything on one line
+        items = [i for i in self._items if not i.isEmpty()]
+        m = self.contentsMargins()
+        width = sum(i.sizeHint().width() for i in items) + self.spacing() * max(0, len(items) - 1)
+        height = max((i.sizeHint().height() for i in items), default=0)
+        return QSize(width + m.left() + m.right(), height + m.top() + m.bottom())
+
+    def minimumSize(self) -> QSize:
+        size = QSize(0, 0)
+        for item in self._items:
+            if not item.isEmpty():
+                size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _place(self, rect: QRect, apply: bool) -> int:
+        """Lay the items out in `rect` (or only measure, if not `apply`); returns the height used."""
+        m = self.contentsMargins()
+        area = rect.marginsRemoved(m)
+        gap = self.spacing()
+        x, y, line_height = area.x(), area.y(), 0
+        for item in self._items:
+            if item.isEmpty():
+                continue
+            hint = item.sizeHint()
+            width = max(item.minimumSize().width(), min(hint.width(), area.width()))
+            if x > area.x() and x + width > area.x() + area.width():
+                x, y, line_height = area.x(), y + line_height + gap, 0
+            if apply:
+                item.setGeometry(QRect(x, y, width, hint.height()))
+            x += width + gap
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + m.bottom()
 
 
 class PillButton(QPushButton):
@@ -361,32 +442,28 @@ class InlineEdit(QLineEdit):
 
 
 class RowActions(QWidget):
-    """Small button strip that fades the text underneath into the row's hover colour."""
+    """A task row's strip of hover buttons. The row's text wraps around it, so it never covers any text."""
 
-    def __init__(self, bg: QColor, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.bg = bg
         self.lay = QHBoxLayout(self)
-        self.lay.setContentsMargins(18, 0, 0, 0)
+        self.lay.setContentsMargins(0, 0, 0, 0)
         self.lay.setSpacing(0)
 
     def add(self, *buttons: QWidget) -> None:
         for b in buttons:
             self.lay.addWidget(b)
 
-    def paintEvent(self, e):
-        p = QPainter(self)
-        clear = QColor(self.bg)
-        clear.setAlpha(0)
-        fade = QLinearGradient(0, 0, 18, 0)
-        fade.setColorAt(0, clear)
-        fade.setColorAt(1, self.bg)
-        p.fillRect(QRectF(0, 0, 18, self.height()), fade)
-        p.fillRect(QRectF(18, 0, self.width() - 18, self.height()), self.bg)
+
+ROOMY_LINE = 120   # px: narrowest first line worth keeping beside a task's full set of hover buttons
 
 
 class TaskText(QWidget):
-    """Word-wrapped task text that can draw an animated strike-through, line by line."""
+    """Word-wrapped task text that can draw an animated strike-through, line by line.
+
+    The top right corner is kept free for the row's hover buttons (`keep_clear`): lines beside them are
+    shorter, like text flowing around a picture. Where that would squeeze the first line too much, the
+    row shows a single "more" button instead and only its width is kept free."""
 
     def __init__(self, text: str, font: QFont, color: QColor, done_color: QColor, done: bool, parent=None,
                  strike: bool = True):
@@ -396,6 +473,7 @@ class TaskText(QWidget):
         self._font = QFont(font)
         self._strike_pos = QFontMetrics(self._font).strikeOutPos()
         self._cache: tuple[int, QTextLayout, int] | None = None
+        self.keep_clear = (0, 0, 0)   # height of the button band, width for all buttons, width for "more"
         self._t = 1.0 if done else 0.0
         self._anim = animation(self, STRIKE_MS, self._set_t)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -413,10 +491,16 @@ class TaskText(QWidget):
         self._t = float(v)
         self.update()
 
+    def roomy(self, width: int) -> bool:
+        """True if the full set of buttons fits beside the text at this width (else just "more")."""
+        return width - self.keep_clear[1] >= ROOMY_LINE
+
     def _layout(self, width: int) -> tuple[QTextLayout, int]:
         width = max(width, 20)
         if self._cache and self._cache[0] == width:
             return self._cache[1], self._cache[2]
+        band, full, compact = self.keep_clear
+        beside = full if self.roomy(width) else compact
         layout = QTextLayout(self._text, self._font)
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
@@ -427,7 +511,8 @@ class TaskText(QWidget):
             line = layout.createLine()
             if not line.isValid():
                 break
-            line.setLineWidth(width)
+            # A few px of overlap is fine: the buttons' icons are smaller than their hover backgrounds.
+            line.setLineWidth(max(20, width - beside) if y < band - 4 else width)
             line.setPosition(QPointF(0, y))
             y += line.height()
         layout.endLayout()
@@ -513,8 +598,9 @@ class TaskRow(QWidget):
         check_col.addStretch(1)
         lay.addLayout(check_col)
 
+        text_top = pad + max(0, (self.check.height() - line) // 2)
         self.col = QVBoxLayout()
-        self.col.setContentsMargins(0, max(0, (self.check.height() - line) // 2), 0, 0)
+        self.col.setContentsMargins(0, text_top - pad, 0, 0)
         self.col.setSpacing(4)
         self.label = TaskText(task.text, self.text_font, pal.text, pal.ink(0.38), done, strike=strike)
         self.col.addWidget(self.label)
@@ -529,34 +615,43 @@ class TaskRow(QWidget):
             text = f"{friendly(when)}  ·  {repeat.short(task.repeat)}" if task.repeat else friendly(when)
             chip = Pill(text, fg, bg, "repeat" if task.repeat else "bell")
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
-            chip.setToolTip("Change reminder")
+            chip.setToolTip(f"{text}\nClick to change the reminder")   # the chip may be too narrow for it all
             chip.clicked.connect(lambda: self.remind.emit(self.task, chip))
             meta.append(chip)
         if since:
             meta.append(Pill(since, pal.sub, pal.wash(0.06)))
         if meta:
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 1)
-            row.setSpacing(6)
+            pills = FlowLayout(spacing=6)
+            pills.setContentsMargins(0, 0, 0, 1)
             for w in meta:
-                row.addWidget(w)
-            row.addStretch(1)
-            self.col.addLayout(row)
+                pills.addWidget(w)
+            self.col.addLayout(pills)
         lay.addLayout(self.col, 1)
 
-        # Hover actions float over the end of the row so the text can use the full width.
-        self.actions = RowActions(self._hover_color(), self)
+        # Hover buttons in the top right corner, centred on the first line; the text wraps around them.
+        # On a narrow card a single "more" button stands in for them, so the text keeps more room.
+        self.full = RowActions(self)
         if not done:
             self.btn_pin = IconButton("pin", pal.accent if task.pinned else pal.sub, 24, 14,
                                       "Unpin" if task.pinned else "Pin to top", pal.wash(0.07))
             self.btn_pin.clicked.connect(lambda: self.pin_toggled.emit(self.task))
-            self.actions.add(self.btn_pin)
+            self.full.add(self.btn_pin)
         self.btn_bell = IconButton("bell", pal.sub, 24, 14, "Remind me", pal.wash(0.07))
         self.btn_bell.clicked.connect(lambda: self.remind.emit(self.task, self.btn_bell))
         self.btn_del = IconButton("x", pal.sub, 24, 14, "Delete task", pal.wash(0.07))
         self.btn_del.clicked.connect(lambda: self.deleted.emit(self.task))
-        self.actions.add(self.btn_bell, self.btn_del)
-        self.actions.hide()
+        self.full.add(self.btn_bell, self.btn_del)
+        self.compact = RowActions(self)
+        self.btn_more = IconButton("more", pal.sub, 24, 14, "Pin, remind or delete", pal.wash(0.07))
+        self.btn_more.clicked.connect(self._more_menu)
+        self.compact.add(self.btn_more)
+        for strip in (self.full, self.compact):
+            strip.adjustSize()
+            strip.hide()
+        self.actions = self.full                 # the strip in use at the row's current width
+        self._actions_y = max(1, text_top + (line - 24) // 2)
+        # The strips end 4px from the row's edge, the text 8px: keep a 6px gap between them.
+        self.label.keep_clear = (self._actions_y + 24 - text_top, self.full.width() + 2, self.compact.width() + 2)
         self._motion: QVariantAnimation | None = None
 
     # enter / exit animations: grow or shrink the row's height while fading it
@@ -602,8 +697,23 @@ class TaskRow(QWidget):
         return mix(QColor(self.pal.bg), overlay, 0.045)
 
     def resizeEvent(self, e):
-        self.actions.adjustSize()
-        self.actions.move(self.width() - self.actions.width() - 4, 3)
+        # The row's layout has already sized the text, so its width says which strip the text left room for.
+        actions = self.full if self.label.roomy(self.label.width()) else self.compact
+        if actions is not self.actions:
+            shown = self.actions.isVisible()
+            self.actions.hide()
+            self.actions = actions
+            actions.setVisible(shown)
+        actions.move(self.width() - actions.width() - 4, self._actions_y)
+
+    def _more_menu(self) -> None:
+        menu = make_menu(self, self.pal.dark)
+        if not self.done:
+            add_action(menu, "Unpin" if self.task.pinned else "Pin to top",
+                       lambda: self.pin_toggled.emit(self.task), icon="pin")
+        add_action(menu, "Remind me…", lambda: self.remind.emit(self.task, self.btn_more), icon="bell")
+        add_action(menu, "Delete task", lambda: self.deleted.emit(self.task), icon="x", danger=True)
+        menu.exec(self.btn_more.mapToGlobal(QPoint(0, self.btn_more.height() + 2)))
 
     def set_done_visual(self, done: bool, animated: bool = True) -> None:
         self.done = done
